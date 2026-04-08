@@ -49,6 +49,8 @@ interface ReportRow {
   population_affected: number | null;
   nearest_place: string | null;
   linked_ceb_id: string | null;
+  is_anonymous: number | null;
+  reporter_name: string | null; // joined from users.display_name
 }
 
 const FUSION_RADIUS_KM = 0.5;
@@ -115,10 +117,13 @@ function mapCebRow(r: CebOutageRow) {
 }
 
 function mapReportRow(r: ReportRow) {
+  const isAnon = (r.is_anonymous ?? 0) === 1;
   return {
     id: r.id,
     source: 'crowdsourced' as const,
-    userId: r.user_id,
+    userId: isAnon ? null : r.user_id,
+    reporterName: isAnon ? null : r.reporter_name,
+    isAnonymous: isAnon,
     areaId: r.area_id,
     areaName: r.area_name,
     type: r.type,
@@ -136,6 +141,15 @@ function mapReportRow(r: ReportRow) {
   };
 }
 
+// Shared SELECT expression for reports that joins users for display_name
+const REPORT_SELECT = `
+  r.id, r.user_id, r.area_id, r.area_name, r.lat, r.lon, r.type, r.status,
+  r.description, r.confirmed_by, r.reported_at, r.resolved_at,
+  r.population_affected, r.nearest_place, r.linked_ceb_id,
+  r.is_anonymous,
+  u.display_name AS reporter_name
+`;
+
 // ──────────────────────────────────────────────────────────
 // GET /api/outages/near?lat=&lon=&radius=
 // ──────────────────────────────────────────────────────────
@@ -149,7 +163,17 @@ outageRoutes.get('/near', async (c) => {
   const radiusKm = Number(c.req.query('radius') ?? 40);
   const limit = Math.min(Number(c.req.query('limit') ?? 5), 10);
 
-  const pollResults = await pollAreasNear(c.env, lat, lon, { limit, radiusKm });
+  // Background refresh — never blocks the response. When the CEB fetch
+  // finishes and the cache actually changes, ceb.service broadcasts a
+  // 'ceb:updated' event through the global Durable Object, which the
+  // frontend's useRealtime hook catches and invalidates the affected
+  // queries. Users see instant D1 data first, then fresh data arrives
+  // silently in the background.
+  c.executionCtx.waitUntil(
+    pollAreasNear(c.env, lat, lon, { limit, radiusKm }).catch((err) => {
+      console.warn('[outages/near] background poll failed', err);
+    }),
+  );
 
   const bb = boundingBox(lat, lon, radiusKm);
   const { results: cebRows } = await c.env.DB.prepare(
@@ -169,10 +193,9 @@ outageRoutes.get('/near', async (c) => {
     .all<CebOutageRow>();
 
   const { results: reportRows } = await c.env.DB.prepare(
-    `SELECT r.id, r.user_id, r.area_id, r.area_name, r.lat, r.lon, r.type, r.status, r.description,
-            r.confirmed_by, r.reported_at, r.resolved_at, r.population_affected,
-            r.nearest_place, r.linked_ceb_id
+    `SELECT ${REPORT_SELECT}
        FROM reports r
+       LEFT JOIN users u ON u.id = r.user_id
       WHERE ${ACTIVE_REPORT_FILTER}
         AND r.linked_ceb_id IS NULL
         AND r.lat BETWEEN ? AND ?
@@ -186,13 +209,9 @@ outageRoutes.get('/near', async (c) => {
     ceb: cebRows.map(mapCebRow),
     crowdsourced: reportRows.map(mapReportRow),
     meta: {
-      polledAreas: pollResults.map((r) => ({
-        areaId: r.areaId,
-        cached: r.cached,
-        outageCount: r.outageCount,
-        error: r.error,
-      })),
-      cached: pollResults.every((r) => r.cached),
+      // Background-fetched, so we don't know the result synchronously.
+      // Clients get fresher data through the realtime broadcast.
+      backgroundRefresh: true,
     },
   });
 });
@@ -250,10 +269,9 @@ outageRoutes.get('/', async (c) => {
   }
 
   const { results: reportRows } = await c.env.DB.prepare(
-    `SELECT r.id, r.user_id, r.area_id, r.area_name, r.lat, r.lon, r.type, r.status,
-            r.description, r.confirmed_by, r.reported_at, r.resolved_at,
-            r.population_affected, r.nearest_place, r.linked_ceb_id
+    `SELECT ${REPORT_SELECT}
        FROM reports r
+       LEFT JOIN users u ON u.id = r.user_id
       WHERE ${reportWhere.join(' AND ')}
       ORDER BY r.reported_at DESC
       LIMIT 500`,
@@ -277,6 +295,7 @@ outageRoutes.post('/report', async (c) => {
     lon?: number;
     type?: 'unplanned' | 'scheduled' | 'restored';
     description?: string;
+    isAnonymous?: boolean;
   }>();
 
   if (typeof body.lat !== 'number' || typeof body.lon !== 'number') {
@@ -286,6 +305,7 @@ outageRoutes.post('/report', async (c) => {
   const lon = body.lon;
   const type = body.type ?? 'unplanned';
   const description = body.description?.slice(0, 500) ?? null;
+  const isAnonymous = body.isAnonymous === true;
   const device = deviceId(c);
   const dName = deviceName(c);
 
@@ -355,8 +375,8 @@ outageRoutes.post('/report', async (c) => {
     `INSERT INTO reports (
        id, user_id, area_id, area_name, lat, lon, type, status,
        description, confirmed_by, reported_at, population_affected,
-       nearest_place, linked_ceb_id
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, 1, datetime('now'), ?, ?, ?)`,
+       nearest_place, linked_ceb_id, is_anonymous
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, 1, datetime('now'), ?, ?, ?, ?)`,
   )
     .bind(
       reportId,
@@ -370,6 +390,7 @@ outageRoutes.post('/report', async (c) => {
       exposure?.totalPopulation ?? null,
       reverse?.placeName ?? null,
       linkedCebId,
+      isAnonymous ? 1 : 0,
     )
     .run();
 
@@ -399,6 +420,8 @@ outageRoutes.post('/report', async (c) => {
       linkedCebId,
       linkedAreaId,
       fused: linkedCebId !== null,
+      isAnonymous,
+      reporterName: isAnonymous ? null : dName,
       expiresInHours: REPORT_TTL_HOURS,
     },
     201,
@@ -434,7 +457,12 @@ outageRoutes.get('/:id', async (c) => {
     });
   }
 
-  const reportRow = await c.env.DB.prepare(`SELECT * FROM reports WHERE id = ?`)
+  const reportRow = await c.env.DB.prepare(
+    `SELECT ${REPORT_SELECT}
+       FROM reports r
+       LEFT JOIN users u ON u.id = r.user_id
+      WHERE r.id = ?`,
+  )
     .bind(id)
     .first<ReportRow>();
 

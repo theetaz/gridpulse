@@ -4,6 +4,9 @@ import { api } from '@/lib/api';
 export interface OutageDetail {
   id: string;
   source: 'ceb' | 'crowdsourced';
+  userId?: string | null;
+  reporterName?: string | null;
+  isAnonymous?: boolean;
   areaId: string | null;
   areaName: string | null;
   type: string;

@@ -15,7 +15,8 @@ const GLOBAL_ROOM = 'global';
 export type RealtimeEvent =
   | { type: 'report:created'; id: string; lat: number; lon: number }
   | { type: 'report:resolved'; id: string }
-  | { type: 'report:deleted'; id: string };
+  | { type: 'report:deleted'; id: string }
+  | { type: 'ceb:updated'; areaId: string };
 
 export async function broadcast(env: Env, event: RealtimeEvent): Promise<void> {
   try {

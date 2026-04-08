@@ -19,6 +19,7 @@ interface PendingReport {
     lon: number;
     type: string;
     description?: string;
+    isAnonymous?: boolean;
   };
   queuedAt: number;
 }

@@ -1,6 +1,7 @@
 import type { Env } from '../types/env';
 import type { ParsedOutage } from '../types/ceb';
 import { fetchAreaOutages, parseCluster } from '../cron/ceb-parser';
+import { broadcast } from './realtime.service';
 import { boundingBox, haversineKm } from '../utils/geo';
 
 /**
@@ -17,7 +18,9 @@ import { boundingBox, haversineKm } from '../utils/geo';
  * Call pollAreasNear(lat, lon) when you only know the user's location.
  */
 
-export const FRESH_TTL_MS = 10 * 60 * 1000; // 10 minutes
+export const FRESH_TTL_MS = 60 * 60 * 1000; // 1 hour — longer TTL makes the
+// client-visible experience snappier. Background refreshes via ctx.waitUntil
+// keep the cache warm without blocking user requests.
 const NEARBY_LIMIT = 5; // poll this many nearest areas per "near me" request
 const NEARBY_RADIUS_KM = 40; // …within this distance
 
@@ -79,6 +82,13 @@ export async function pollArea(env: Env, areaId: string): Promise<PollResult> {
     )
       .bind(areaId)
       .run();
+
+    // If anything actually changed, tell connected clients so they can
+    // refetch their current view. Silent no-op if nothing changed.
+    if (diff.inserted > 0 || diff.updated > 0 || diff.resolved > 0) {
+      void broadcast(env, { type: 'ceb:updated', areaId });
+    }
+
     return {
       areaId,
       cached: false,

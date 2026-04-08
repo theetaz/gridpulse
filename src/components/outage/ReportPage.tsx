@@ -2,12 +2,13 @@ import { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Loader2, ZapOff, AlertCircle } from 'lucide-react';
+import { X, Loader2, ZapOff, AlertCircle, EyeOff, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useAppStore } from '@/stores/appStore';
 import { useHomeLocation } from '@/hooks/useHomeLocation';
 import { useGeolocation } from '@/hooks/useGeolocation';
+import { useDisplayName } from '@/hooks/useDisplayName';
 import { submitReportResilient } from '@/lib/offlineQueue';
 import { ApiError } from '@/lib/api';
 import type { ReportCreateResponse } from '@/types/api';
@@ -35,8 +36,10 @@ export function ReportPage() {
   const manual = useAppStore((s) => s.manualLocation);
   const { home } = useHomeLocation();
   const { position } = useGeolocation(false);
+  const { name: displayName } = useDisplayName();
   const [description, setDescription] = useState('');
   const [location, setLocation] = useState<ChosenLocation | null>(null);
+  const [isAnonymous, setIsAnonymous] = useState(false);
   const qc = useQueryClient();
 
   // Compute the "best default" once per open so the user isn't
@@ -76,6 +79,7 @@ export function ReportPage() {
     if (!open) {
       setDescription('');
       setLocation(null);
+      setIsAnonymous(false);
       return;
     }
     // Only set the default on the OPEN transition so we don't clobber
@@ -91,6 +95,7 @@ export function ReportPage() {
         lon: location!.lon,
         type: 'unplanned',
         description: description.trim() || undefined,
+        isAnonymous,
       }),
     onSuccess: (data) => {
       if (data === null) {
@@ -181,6 +186,42 @@ export function ReportPage() {
               />
               <p className="text-muted-foreground mt-1 text-[10px]">
                 {description.length}/500
+              </p>
+            </div>
+
+            {/* Anonymity toggle */}
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wide">
+                {t('report.contribute_as')}
+              </label>
+              <div className="border-border mt-1.5 grid grid-cols-2 gap-0 border">
+                <button
+                  type="button"
+                  onClick={() => setIsAnonymous(false)}
+                  className={`flex items-center justify-center gap-1.5 border-r px-2 py-2.5 text-[11px] font-bold transition ${
+                    !isAnonymous
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground hover:bg-accent'
+                  }`}
+                >
+                  <User className="h-3.5 w-3.5" />
+                  <span className="truncate">{displayName}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsAnonymous(true)}
+                  className={`flex items-center justify-center gap-1.5 px-2 py-2.5 text-[11px] font-bold transition ${
+                    isAnonymous
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground hover:bg-accent'
+                  }`}
+                >
+                  <EyeOff className="h-3.5 w-3.5" />
+                  <span>{t('report.anonymous')}</span>
+                </button>
+              </div>
+              <p className="text-muted-foreground mt-1.5 text-[10px]">
+                {isAnonymous ? t('report.anonymous_hint') : t('report.named_hint')}
               </p>
             </div>
 

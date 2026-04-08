@@ -7,6 +7,12 @@ import { useAppStore } from '@/stores/appStore';
 import { useTheme } from '@/components/theme-provider';
 import { buildOutageGeoJSON } from '@/lib/geo-helpers';
 import { MapControls } from './MapControls';
+import { getDeviceId } from '@/lib/profile';
+import {
+  buildMarkerElement,
+  ensureMarkerStyles,
+  type MarkerKind,
+} from './markerIcons';
 
 // When the user pans the map more than ~5 km from the last fetched
 // point, trigger a fresh /api/outages/near call for the new region.
@@ -34,9 +40,12 @@ export function OutageMap() {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const userMarkerRef = useRef<maplibregl.Marker | null>(null);
 
-  // Location used as the default fetch center. When the user pans the
-  // map, we override this with the map center so the lazy endpoint
-  // refreshes for wherever they're actually looking.
+  // Track custom HTML markers by outage id so we can diff on updates
+  // rather than tearing down and rebuilding every frame.
+  const markerIndex = useRef<
+    Map<string, { marker: maplibregl.Marker; kind: MarkerKind }>
+  >(new Map());
+
   const location = useLocation();
   const [fetchCenter, setFetchCenter] = useState<{ lat: number; lon: number } | null>(null);
 
@@ -59,6 +68,7 @@ export function OutageMap() {
   // Initialize map once
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
+    ensureMarkerStyles();
 
     const isDark =
       theme === 'dark' ||
@@ -82,18 +92,15 @@ export function OutageMap() {
     );
 
     map.on('load', () => {
+      // CEB polygons (big cluster outages) stay as a data-driven layer
       map.addSource('ceb-polygons', { type: 'geojson', data: EMPTY_FC });
-      map.addSource('ceb-points', { type: 'geojson', data: EMPTY_FC });
-      map.addSource('crowd-points', { type: 'geojson', data: EMPTY_FC });
-
-      // Polygon fills (CEB multi-point outages)
       map.addLayer({
         id: 'ceb-polygons-fill',
         type: 'fill',
         source: 'ceb-polygons',
         paint: {
           'fill-color': ['get', 'color'],
-          'fill-opacity': 0.25,
+          'fill-opacity': 0.22,
         },
       });
       map.addLayer({
@@ -106,50 +113,18 @@ export function OutageMap() {
         },
       });
 
-      // Single-point CEB outages
-      map.addLayer({
-        id: 'ceb-points-circle',
-        type: 'circle',
-        source: 'ceb-points',
-        paint: {
-          'circle-radius': 8,
-          'circle-color': ['get', 'color'],
-          'circle-stroke-width': 2,
-          'circle-stroke-color': '#ffffff',
-          'circle-opacity': 0.9,
-        },
-      });
-
-      // Crowdsourced reports
-      map.addLayer({
-        id: 'crowd-points-circle',
-        type: 'circle',
-        source: 'crowd-points',
-        paint: {
-          'circle-radius': 7,
-          'circle-color': '#3b82f6',
-          'circle-stroke-width': 2,
-          'circle-stroke-color': '#ffffff',
-          'circle-opacity': 0.9,
-        },
-      });
-
-      // Click → open detail sheet
+      // Click → open detail sheet (polygons only — points are HTML markers)
       const onClick = (e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
         const id = e.features?.[0]?.properties?.id as string | undefined;
         if (id) selectOutage(id);
       };
       const onEnter = () => (map.getCanvas().style.cursor = 'pointer');
       const onLeave = () => (map.getCanvas().style.cursor = '');
-      ['ceb-polygons-fill', 'ceb-points-circle', 'crowd-points-circle'].forEach((layerId) => {
-        map.on('click', layerId, onClick);
-        map.on('mouseenter', layerId, onEnter);
-        map.on('mouseleave', layerId, onLeave);
-      });
+      map.on('click', 'ceb-polygons-fill', onClick);
+      map.on('mouseenter', 'ceb-polygons-fill', onEnter);
+      map.on('mouseleave', 'ceb-polygons-fill', onLeave);
 
-      // Debounced "pan → refetch" trigger. On moveend we compare the new
-      // center to the last fetched point, and only kick a new query if
-      // the user has moved far enough to matter.
+      // Debounced pan → refetch
       let debounceHandle: number | undefined;
       map.on('moveend', () => {
         if (debounceHandle != null) window.clearTimeout(debounceHandle);
@@ -166,28 +141,84 @@ export function OutageMap() {
 
     mapRef.current = map;
     return () => {
+      for (const { marker } of markerIndex.current.values()) marker.remove();
+      markerIndex.current.clear();
       map.remove();
       mapRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Push outage data into the map
+  // Push data into the map: polygons as a GeoJSON source, points as HTML markers
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !data) return;
+
     const apply = () => {
-      const { polygons, cebPoints, crowdPoints } = buildOutageGeoJSON(data.ceb, data.crowdsourced);
+      const { polygons } = buildOutageGeoJSON(data.ceb, data.crowdsourced);
       (map.getSource('ceb-polygons') as GeoJSONSource | undefined)?.setData(polygons);
-      (map.getSource('ceb-points') as GeoJSONSource | undefined)?.setData(cebPoints);
-      (map.getSource('crowd-points') as GeoJSONSource | undefined)?.setData(crowdPoints);
+
+      // Reconcile HTML markers
+      const me = getDeviceId();
+      const next = new Map<
+        string,
+        { lat: number; lon: number; kind: MarkerKind; id: string }
+      >();
+
+      // CEB single-points (anything whose polygon has 1 vertex)
+      if (showCeb) {
+        for (const o of data.ceb) {
+          if (!o.polygon || o.polygon.length !== 1) continue;
+          next.set(o.id, {
+            id: o.id,
+            lat: o.polygon[0].lat,
+            lon: o.polygon[0].lon,
+            kind: 'ceb',
+          });
+        }
+      }
+
+      // Crowd reports — mine gets a distinct marker variant
+      if (showCrowd) {
+        for (const r of data.crowdsourced) {
+          const kind: MarkerKind = r.userId === me ? 'mine' : 'crowd';
+          next.set(r.id, { id: r.id, lat: r.lat, lon: r.lon, kind });
+        }
+      }
+
+      // Remove stale markers
+      for (const [id, entry] of markerIndex.current) {
+        const incoming = next.get(id);
+        if (!incoming || incoming.kind !== entry.kind) {
+          entry.marker.remove();
+          markerIndex.current.delete(id);
+        }
+      }
+
+      // Add new markers + reposition any existing ones
+      for (const { id, lat, lon, kind } of next.values()) {
+        const existing = markerIndex.current.get(id);
+        if (existing) {
+          existing.marker.setLngLat([lon, lat]);
+          continue;
+        }
+        const el = buildMarkerElement(kind);
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          selectOutage(id);
+        });
+        const marker = new maplibregl.Marker({ element: el })
+          .setLngLat([lon, lat])
+          .addTo(map);
+        markerIndex.current.set(id, { marker, kind });
+      }
     };
+
     if (map.isStyleLoaded()) apply();
     else map.once('load', apply);
-  }, [data]);
+  }, [data, selectOutage, showCeb, showCrowd]);
 
-  // User location marker — position is either the browser's GPS or the
-  // user's manually chosen city.
+  // User location marker
   useEffect(() => {
     const map = mapRef.current;
     if (!map || location.lat == null || location.lon == null) return;
@@ -204,17 +235,26 @@ export function OutageMap() {
     map.flyTo({ center: coords, zoom: 12, duration: 1500 });
   }, [location.lat, location.lon]);
 
-  // Toggle CEB/crowd layer visibility without rebuilding the map
+  // Toggle CEB/crowd layer visibility — polygons via setLayoutProperty,
+  // markers get hidden/shown via visibility CSS.
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     const apply = () => {
       const cebVis = showCeb ? 'visible' : 'none';
-      const crowdVis = showCrowd ? 'visible' : 'none';
-      if (map.getLayer('ceb-polygons-fill')) map.setLayoutProperty('ceb-polygons-fill', 'visibility', cebVis);
-      if (map.getLayer('ceb-polygons-line')) map.setLayoutProperty('ceb-polygons-line', 'visibility', cebVis);
-      if (map.getLayer('ceb-points-circle')) map.setLayoutProperty('ceb-points-circle', 'visibility', cebVis);
-      if (map.getLayer('crowd-points-circle')) map.setLayoutProperty('crowd-points-circle', 'visibility', crowdVis);
+      if (map.getLayer('ceb-polygons-fill'))
+        map.setLayoutProperty('ceb-polygons-fill', 'visibility', cebVis);
+      if (map.getLayer('ceb-polygons-line'))
+        map.setLayoutProperty('ceb-polygons-line', 'visibility', cebVis);
+
+      for (const { marker, kind } of markerIndex.current.values()) {
+        const el = marker.getElement();
+        if (kind === 'ceb') {
+          el.style.display = showCeb ? '' : 'none';
+        } else {
+          el.style.display = showCrowd ? '' : 'none';
+        }
+      }
     };
     if (map.isStyleLoaded()) apply();
     else map.once('load', apply);
@@ -228,17 +268,14 @@ export function OutageMap() {
       theme === 'dark' ||
       (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
     map.setStyle(isDark ? STYLE_DARK : STYLE_LIGHT);
-    // Re-add sources/layers after style swap
     map.once('styledata', () => {
       if (!map.getSource('ceb-polygons')) {
         map.addSource('ceb-polygons', { type: 'geojson', data: EMPTY_FC });
-        map.addSource('ceb-points', { type: 'geojson', data: EMPTY_FC });
-        map.addSource('crowd-points', { type: 'geojson', data: EMPTY_FC });
         map.addLayer({
           id: 'ceb-polygons-fill',
           type: 'fill',
           source: 'ceb-polygons',
-          paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.25 },
+          paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.22 },
         });
         map.addLayer({
           id: 'ceb-polygons-line',
@@ -246,34 +283,10 @@ export function OutageMap() {
           source: 'ceb-polygons',
           paint: { 'line-color': ['get', 'color'], 'line-width': 2 },
         });
-        map.addLayer({
-          id: 'ceb-points-circle',
-          type: 'circle',
-          source: 'ceb-points',
-          paint: {
-            'circle-radius': 8,
-            'circle-color': ['get', 'color'],
-            'circle-stroke-width': 2,
-            'circle-stroke-color': '#ffffff',
-          },
-        });
-        map.addLayer({
-          id: 'crowd-points-circle',
-          type: 'circle',
-          source: 'crowd-points',
-          paint: {
-            'circle-radius': 7,
-            'circle-color': '#3b82f6',
-            'circle-stroke-width': 2,
-            'circle-stroke-color': '#ffffff',
-          },
-        });
       }
       if (data) {
-        const { polygons, cebPoints, crowdPoints } = buildOutageGeoJSON(data.ceb, data.crowdsourced);
+        const { polygons } = buildOutageGeoJSON(data.ceb, data.crowdsourced);
         (map.getSource('ceb-polygons') as GeoJSONSource | undefined)?.setData(polygons);
-        (map.getSource('ceb-points') as GeoJSONSource | undefined)?.setData(cebPoints);
-        (map.getSource('crowd-points') as GeoJSONSource | undefined)?.setData(crowdPoints);
       }
     });
   }, [theme, data]);

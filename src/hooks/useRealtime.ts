@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { usePresenceStore } from '@/stores/presenceStore';
 
 /**
  * Opens a WebSocket to the worker's global AreaRoom Durable Object
@@ -11,6 +12,7 @@ import { useQueryClient } from '@tanstack/react-query';
  */
 export function useRealtime() {
   const qc = useQueryClient();
+  const setOnlineCount = usePresenceStore((s) => s.setOnlineCount);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<number | undefined>(undefined);
   const closedIntentionallyRef = useRef(false);
@@ -40,19 +42,26 @@ export function useRealtime() {
         };
 
         ws.onmessage = (event) => {
-          let data: { type?: string } | undefined;
+          let data: { type?: string; count?: number } | undefined;
           try {
             data = JSON.parse(event.data);
           } catch {
             return;
           }
           if (!data?.type) return;
+
+          if (data.type === 'presence' && typeof data.count === 'number') {
+            setOnlineCount(data.count);
+            return;
+          }
+
           // Any report mutation invalidates the relevant caches. Users
           // see a fresh view within the next render tick.
           if (
             data.type === 'report:created' ||
             data.type === 'report:resolved' ||
-            data.type === 'report:deleted'
+            data.type === 'report:deleted' ||
+            data.type === 'ceb:updated'
           ) {
             qc.invalidateQueries({ queryKey: ['outages'] });
             qc.invalidateQueries({ queryKey: ['power-status'] });

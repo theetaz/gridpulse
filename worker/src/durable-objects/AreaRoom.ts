@@ -26,6 +26,8 @@ export class AreaRoom implements DurableObject {
       const [client, server] = Object.values(pair);
       this.state.acceptWebSocket(server);
       this.sessions.set(server, {});
+      // Tell the newcomer the current count + notify everyone
+      this.broadcastPresence();
       return new Response(null, { status: 101, webSocket: client });
     }
 
@@ -35,7 +37,18 @@ export class AreaRoom implements DurableObject {
       return new Response('ok');
     }
 
+    if (url.pathname === '/stats') {
+      return new Response(JSON.stringify({ onlineCount: this.sessions.size }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
     return new Response('not found', { status: 404 });
+  }
+
+  private broadcastPresence() {
+    const msg = JSON.stringify({ type: 'presence', count: this.sessions.size });
+    this.broadcast(msg);
   }
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
@@ -65,10 +78,12 @@ export class AreaRoom implements DurableObject {
 
   async webSocketClose(ws: WebSocket) {
     this.sessions.delete(ws);
+    this.broadcastPresence();
   }
 
   async webSocketError(ws: WebSocket) {
     this.sessions.delete(ws);
+    this.broadcastPresence();
   }
 
   private broadcast(message: string, exclude?: WebSocket) {

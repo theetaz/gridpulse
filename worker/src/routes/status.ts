@@ -25,13 +25,23 @@ statusRoutes.get('/', async (c) => {
   const analytics = new AnalyticsService(c.env.DB);
   const geopop = new GeoPopService(c.env.GEOPOP_URL);
 
-  // Refresh the areas near this user in parallel with GeoPop, then
-  // compute the status against freshly-reconciled D1 state.
-  const [, place] = await Promise.all([
-    pollAreasNear(c.env, lat, lon, { limit: 3, radiusKm: 20 }),
+  // 1. Read what's already in D1 — this is always instant. GeoPop reverse
+  //    is fast (local network) so we can await that.
+  const [status, place] = await Promise.all([
+    analytics.powerStatus(lat, lon, 2),
     geopop.reverse(lat, lon),
   ]);
-  const status = await analytics.powerStatus(lat, lon, 2);
+
+  // 2. Kick off a background CEB refresh without blocking the response.
+  //    When it finishes (possibly slow due to retries / rate-limit
+  //    backoff), the 'ceb:updated' broadcast reaches every connected
+  //    client through the realtime WebSocket and their TanStack Query
+  //    caches are invalidated — the UI updates without reloading.
+  c.executionCtx.waitUntil(
+    pollAreasNear(c.env, lat, lon, { limit: 3, radiusKm: 20 }).catch((err) => {
+      console.warn('[status] background poll failed', err);
+    }),
+  );
 
   return c.json({
     coordinates: { lat, lon },

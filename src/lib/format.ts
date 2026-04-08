@@ -48,3 +48,33 @@ export function formatDuration(mins: number | null | undefined): string {
   if (h < 24) return `${h.toFixed(1)} h`;
   return `${(h / 24).toFixed(1)} d`;
 }
+
+/**
+ * Absolute date/time formatted in the viewer's local timezone.
+ * Returns something like "Apr 8, 9:11 PM GMT+5:30" regardless of
+ * where the report was originally submitted — the user sees it as
+ * their local clock would read it.
+ */
+export function absoluteTime(value: string | Date | null | undefined): string {
+  if (!value) return '';
+  try {
+    const date = typeof value === 'string' ? parseAny(value) : value;
+    return new Intl.DateTimeFormat(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZoneName: 'shortOffset',
+    }).format(date);
+  } catch {
+    return '';
+  }
+}
+
+function parseAny(value: string): Date {
+  // D1 datetime('now') returns "YYYY-MM-DD HH:MM:SS" (UTC).
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(value)) {
+    return new Date(value.replace(' ', 'T') + 'Z');
+  }
+  return new Date(value);
+}

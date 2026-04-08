@@ -51,13 +51,13 @@ CREATE INDEX IF NOT EXISTS idx_ceb_outages_geo    ON ceb_outages(centroid_lat, c
 -- Crowdsourced Reports
 CREATE TABLE IF NOT EXISTS reports (
   id                  TEXT PRIMARY KEY,     -- UUID
-  user_id             TEXT,                 -- anonymous device id, nullable
+  user_id             TEXT,                 -- device id, nullable
   area_id             TEXT REFERENCES areas(area_id),
   area_name           TEXT,
   lat                 REAL NOT NULL,
   lon                 REAL NOT NULL,
   type                TEXT NOT NULL,        -- 'unplanned', 'scheduled', 'restored'
-  status              TEXT DEFAULT 'active',-- active, confirmed, resolved, spam
+  status              TEXT DEFAULT 'active',-- active, confirmed, resolved, spam, deleted
   description         TEXT,
   photo_key           TEXT,                 -- R2 object key
   confirmed_by        INTEGER DEFAULT 1,
@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS reports (
   population_affected INTEGER,              -- from GeoPop /exposure
   nearest_place       TEXT,                 -- from GeoPop /reverse
   linked_ceb_id       TEXT REFERENCES ceb_outages(id), -- fusion: linked CEB outage
+  is_anonymous        INTEGER DEFAULT 0,    -- 1 = show as "Anonymous" in feeds
   created_at          TEXT DEFAULT (datetime('now'))
 );
 

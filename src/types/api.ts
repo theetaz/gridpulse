@@ -33,6 +33,9 @@ export interface CebOutage {
 export interface CrowdReport {
   id: string;
   source: 'crowdsourced';
+  userId: string | null;
+  reporterName: string | null;
+  isAnonymous: boolean;
   areaId: string | null;
   areaName: string | null;
   type: string;
