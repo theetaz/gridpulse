@@ -15,13 +15,14 @@ export function AppShell() {
   const tab = useAppStore((s) => s.tab);
 
   return (
-    <div className="bg-muted/40 flex min-h-svh w-full justify-center">
+    <div className="bg-muted/40 flex h-dvh w-full justify-center overflow-hidden">
       {/* Mobile-first: cap content at ~480px on wider screens so the app
-          keeps its phone-shaped layout on desktop. Everything inside
-          still scales fluidly down to ~320px. */}
-      <div className="bg-background text-foreground border-border relative flex min-h-svh w-full max-w-[480px] flex-col sm:border-x">
+          keeps its phone-shaped layout on desktop. h-dvh gives us the
+          dynamic viewport height so we track the browser's retracting
+          toolbars on mobile scroll. */}
+      <div className="bg-background text-foreground border-border relative flex h-dvh max-h-dvh w-full max-w-[480px] flex-col overflow-hidden sm:border-x">
         <Header />
-        <main className="flex-1 overflow-y-auto pb-20">
+        <main className="flex-1 min-h-0 overflow-y-auto">
           <Suspense fallback={<ShellFallback />}>
             {tab === 'home' && <HomePage />}
             {tab === 'map' && <MapPage />}

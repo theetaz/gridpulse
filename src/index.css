@@ -120,11 +120,34 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
-    }
-  body {
-    @apply bg-background text-foreground;
-    }
+  }
   html {
     @apply font-mono;
+    /* Respect notches + home indicator by default */
+    height: 100%;
+    /* Allow the document to paint behind system UI */
+    background: var(--background);
+  }
+  body {
+    @apply bg-background text-foreground;
+    /* Prevent iOS text size inflation when rotating */
+    -webkit-text-size-adjust: 100%;
+    /* Avoid rubber-band scrolling pushing content under the notch */
+    overscroll-behavior-y: none;
+    min-height: 100dvh;
+  }
+
+  /*
+   * iOS Safari + Chrome auto-zoom into any <input>/<textarea>/<select>
+   * whose font-size is below 16px. We size form controls at 16px on
+   * touch devices to keep the zoom at 1.0 regardless of shadcn's default
+   * text-sm (14px). On desktop the controls stay text-sm for density.
+   */
+  @media (max-width: 768px) {
+    input,
+    textarea,
+    select {
+      font-size: 16px !important;
     }
+  }
 }

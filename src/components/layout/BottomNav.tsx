@@ -16,7 +16,10 @@ export function BottomNav() {
   const openReportSheet = useAppStore((s) => s.openReportSheet);
 
   return (
-    <nav className="border-border bg-background/95 absolute inset-x-0 bottom-0 z-30 border-t backdrop-blur">
+    <nav
+      className="border-border bg-background/95 shrink-0 border-t backdrop-blur"
+      style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+    >
       <div className="relative grid h-16 grid-cols-5">
         {TABS.slice(0, 2).map(({ tab: t2, icon: Icon, key }) => (
           <NavButton

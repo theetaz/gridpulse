@@ -8,7 +8,10 @@ import { ProfileMenu } from '@/components/common/ProfileMenu';
 export function Header() {
   const { t } = useTranslation();
   return (
-    <header className="border-border bg-background/80 sticky top-0 z-30 border-b backdrop-blur">
+    <header
+      className="border-border bg-background/80 shrink-0 border-b backdrop-blur"
+      style={{ paddingTop: 'env(safe-area-inset-top)' }}
+    >
       <div className="flex h-14 items-center justify-between px-4">
         <div className="flex items-center gap-2">
           <div className="bg-primary text-primary-foreground flex h-8 w-8 items-center justify-center">
