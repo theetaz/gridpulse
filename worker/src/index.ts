@@ -6,6 +6,8 @@ import { areaRoutes } from './routes/areas';
 import { analyticsRoutes } from './routes/analytics';
 import { statusRoutes } from './routes/status';
 import { geocodeRoutes } from './routes/geocode';
+import { meRoutes } from './routes/me';
+import { leaderboardRoutes } from './routes/leaderboard';
 import { pollCEBData } from './cron/ceb-poller';
 
 export { AreaRoom } from './durable-objects/AreaRoom';
@@ -61,6 +63,8 @@ app.route('/api/areas', areaRoutes);
 app.route('/api/analytics', analyticsRoutes);
 app.route('/api/status', statusRoutes);
 app.route('/api/geocode', geocodeRoutes);
+app.route('/api/me', meRoutes);
+app.route('/api/leaderboard', leaderboardRoutes);
 
 // WebSocket upgrade → Durable Object (one room per CEB area)
 app.get('/ws/:areaId', async (c) => {

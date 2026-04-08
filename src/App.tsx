@@ -3,8 +3,14 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from '@/lib/queryClient';
 import { AppShell } from '@/components/layout/AppShell';
 import { installOfflineSync } from '@/lib/offlineQueue';
+import { useRealtime } from '@/hooks/useRealtime';
 import { toast } from 'sonner';
 import '@/lib/i18n';
+
+function RealtimeBridge() {
+  useRealtime();
+  return null;
+}
 
 export function App() {
   useEffect(() => {
@@ -18,6 +24,7 @@ export function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
+      <RealtimeBridge />
       <Suspense fallback={null}>
         <AppShell />
       </Suspense>

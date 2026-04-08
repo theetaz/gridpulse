@@ -155,7 +155,6 @@ export function LocationChooser({ value, onChange, hideHome }: Props) {
           <div className="relative">
             <Search className="text-muted-foreground pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2" />
             <Input
-              autoFocus
               placeholder={t('search.placeholder')}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -186,16 +185,26 @@ export function LocationChooser({ value, onChange, hideHome }: Props) {
               <button
                 key={r.placeId}
                 type="button"
-                onClick={() =>
+                style={{ touchAction: 'manipulation' }}
+                // Use onPointerDown so the selection happens BEFORE the
+                // soft keyboard starts animating away — otherwise on iOS
+                // the button moves under the user's finger between
+                // pointerdown and the synthetic click, and the click
+                // lands on empty space.
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  (document.activeElement as HTMLElement | null)?.blur();
                   onChange({
                     lat: r.lat,
                     lon: r.lon,
                     source: 'search',
                     name: r.name,
                     displayName: r.displayName,
-                  })
-                }
-                className="border-border hover:bg-accent flex w-full items-center gap-3 border-b p-3 text-left last:border-0"
+                  });
+                  setQuery('');
+                }}
+                className="border-border hover:bg-accent flex w-full items-center gap-3 border-b p-3 text-left last:border-0 active:bg-accent"
               >
                 <MapPin className="text-muted-foreground h-4 w-4 shrink-0" />
                 <div className="min-w-0 flex-1">

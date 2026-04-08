@@ -5,6 +5,7 @@ import { useAppStore } from '@/stores/appStore';
 import { Skeleton } from '@/components/ui/skeleton';
 import { relativeTime, formatNumber } from '@/lib/format';
 import { useLocation } from '@/hooks/useLocation';
+import { MyReportsSection } from '@/components/feed/MyReportsSection';
 import type { CebOutage, CrowdReport } from '@/types/api';
 
 export function FeedPage() {
@@ -27,11 +28,13 @@ export function FeedPage() {
   });
 
   return (
-    <div className="space-y-4 p-4">
+    <div className="space-y-3 p-3">
       <header>
-        <h2 className="text-xl font-bold tracking-tight">{t('feed.title')}</h2>
-        <p className="text-muted-foreground text-sm">{t('feed.subtitle')}</p>
+        <h2 className="text-lg font-bold tracking-tight">{t('feed.title')}</h2>
+        <p className="text-muted-foreground text-xs">{t('feed.subtitle')}</p>
       </header>
+
+      <MyReportsSection />
 
       {isLoading ? (
         <div className="space-y-2">

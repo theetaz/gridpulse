@@ -63,14 +63,28 @@
     "src_map": "pinned on map",
     "description_label": "Anything else? (optional)",
     "description_placeholder": "e.g. lights went off about 10 minutes ago",
+    "location_label": "Where is the power cut?",
+    "expiry_hint": "Your report will be visible to others for 24 hours, then it automatically expires. You can mark it resolved or delete it any time from the Feed tab.",
     "submit": "Submit report",
     "submitting": "Submitting…",
     "success_title": "Thanks!",
     "success_body": "Your report is live. Neighbors nearby can see it now.",
     "fused_title": "Linked to existing outage",
     "fused_body": "We matched your report with a CEB outage already in your area.",
+    "duplicate_title": "Already reported",
+    "duplicate_body": "You already reported a power cut at this location. Resolve the existing one first if the power is back.",
     "error_location": "Couldn't get your location",
     "error_submit": "Couldn't submit your report. Try again."
+  },
+  "me": {
+    "your_reports": "Your reports",
+    "recent_history": "Recent history",
+    "power_back": "Power's back",
+    "delete": "Delete",
+    "resolved_ok": "Marked as resolved",
+    "deleted_ok": "Report deleted",
+    "marked_resolved": "Marked resolved",
+    "deleted": "Deleted"
   },
   "outage": {
     "breakdown": "Unplanned breakdown",
@@ -116,7 +130,13 @@
     "avg_duration": "Avg time to restore",
     "peak_hours": "When power cuts usually happen",
     "no_data": "Not enough history yet",
-    "select_area": "Pick an area"
+    "select_area": "Pick an area",
+    "leaderboard_title": "Top contributors",
+    "leaderboard_subtitle": "All time",
+    "leaderboard_empty": "Be the first to report an outage",
+    "report_one": "report",
+    "report_other": "reports",
+    "you": "You"
   },
   "common": {
     "loading": "Loading…",

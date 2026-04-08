@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env } from '../types/env';
 import { GeoPopService } from '../services/geopop.service';
 import { pollAreasNear } from '../services/ceb.service';
+import { broadcast } from '../services/realtime.service';
 import { boundingBox, haversineKm } from '../utils/geo';
 
 export const outageRoutes = new Hono<{ Bindings: Env }>();
@@ -34,6 +35,7 @@ interface CebOutageRow {
 
 interface ReportRow {
   id: string;
+  user_id: string | null;
   area_id: string | null;
   area_name: string | null;
   lat: number;
@@ -49,10 +51,22 @@ interface ReportRow {
   linked_ceb_id: string | null;
 }
 
-const FUSION_RADIUS_KM = 0.5; // link a crowd report to a CEB outage if within 500 m
+const FUSION_RADIUS_KM = 0.5;
+const DEDUPE_RADIUS_KM = 0.5;
+const REPORT_TTL_HOURS = 24;
+
+// Reports this old or older are never shown in "active" views but are
+// kept in the DB for the contribution leaderboard + history analytics.
+const ACTIVE_REPORT_FILTER =
+  "r.status = 'active' AND datetime(r.reported_at) > datetime('now', '-24 hours')";
 
 function deviceId(c: { req: { header: (n: string) => string | undefined } }): string {
   return c.req.header('x-device-id') ?? 'anonymous';
+}
+
+function deviceName(c: { req: { header: (n: string) => string | undefined } }): string | null {
+  const raw = c.req.header('x-device-name');
+  return raw ? raw.slice(0, 64) : null;
 }
 
 function outageTypeLabel(typeId: number): 'breakdown' | 'demand_management' | 'planned' {
@@ -61,50 +75,21 @@ function outageTypeLabel(typeId: number): 'breakdown' | 'demand_management' | 'p
   return 'planned';
 }
 
-// ──────────────────────────────────────────────────────────
-// GET /api/outages/near?lat=&lon=&radius=
-//
-// Lazy cache-first entrypoint used by the frontend whenever it needs
-// fresh outages for "near me". We:
-//   1. Find the N closest CEB areas by centroid (within radius)
-//   2. For each, call pollArea() — D1 cache-hit or single CEB fetch
-//   3. Return the freshened merged (CEB + crowd) view
-//
-// This is the ONLY path that causes CEB traffic. All other endpoints
-// read from D1 only.
-// ──────────────────────────────────────────────────────────
-
-outageRoutes.get('/near', async (c) => {
-  const lat = Number(c.req.query('lat'));
-  const lon = Number(c.req.query('lon'));
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-    return c.json({ error: 'lat and lon are required' }, 400);
-  }
-  const radiusKm = Number(c.req.query('radius') ?? 40);
-  const limit = Math.min(Number(c.req.query('limit') ?? 5), 10);
-
-  // 1. Refresh the nearest areas (cache-aware)
-  const pollResults = await pollAreasNear(c.env, lat, lon, { limit, radiusKm });
-
-  // 2. Read merged outages that intersect the requested region
-  const bb = boundingBox(lat, lon, radiusKm);
-  const { results: cebRows } = await c.env.DB.prepare(
-    `SELECT o.id, o.area_id, a.area_name, o.outage_type_id, o.num_customers,
-            o.timestamp, o.generated_time, o.start_time, o.end_time,
-            o.group_id, o.interruption_id, o.interruption_type,
-            o.polygon, o.centroid_lat, o.centroid_lon, o.status,
-            o.first_seen_at, o.last_seen_at, o.resolved_at
-       FROM ceb_outages o
-       LEFT JOIN areas a ON a.area_id = o.area_id
-      WHERE o.status = 'active'
-        AND o.centroid_lat BETWEEN ? AND ?
-        AND o.centroid_lon BETWEEN ? AND ?
-      LIMIT 500`,
+/**
+ * Upsert the users row so the leaderboard can show a display name for
+ * each device. Called on every report so the name stays fresh.
+ */
+async function touchUser(env: Env, id: string, name: string | null): Promise<void> {
+  await env.DB.prepare(
+    `INSERT INTO users (id, display_name) VALUES (?, ?)
+     ON CONFLICT(id) DO UPDATE SET display_name = COALESCE(excluded.display_name, users.display_name)`,
   )
-    .bind(bb.minLat, bb.maxLat, bb.minLon, bb.maxLon)
-    .all<CebOutageRow>();
+    .bind(id, name)
+    .run();
+}
 
-  const ceb = cebRows.map((r) => ({
+function mapCebRow(r: CebOutageRow) {
+  return {
     id: r.id,
     source: 'ceb' as const,
     areaId: r.area_id,
@@ -126,24 +111,14 @@ outageRoutes.get('/near', async (c) => {
     firstSeenAt: r.first_seen_at,
     lastSeenAt: r.last_seen_at,
     resolvedAt: r.resolved_at,
-  }));
+  };
+}
 
-  const { results: reportRows } = await c.env.DB.prepare(
-    `SELECT id, area_id, area_name, lat, lon, type, status, description,
-            confirmed_by, reported_at, resolved_at, population_affected,
-            nearest_place, linked_ceb_id
-       FROM reports
-      WHERE status = 'active' AND linked_ceb_id IS NULL
-        AND lat BETWEEN ? AND ?
-        AND lon BETWEEN ? AND ?
-      LIMIT 500`,
-  )
-    .bind(bb.minLat, bb.maxLat, bb.minLon, bb.maxLon)
-    .all<ReportRow>();
-
-  const crowdsourced = reportRows.map((r) => ({
+function mapReportRow(r: ReportRow) {
+  return {
     id: r.id,
     source: 'crowdsourced' as const,
+    userId: r.user_id,
     areaId: r.area_id,
     areaName: r.area_name,
     type: r.type,
@@ -158,11 +133,58 @@ outageRoutes.get('/near', async (c) => {
     nearestPlace: r.nearest_place,
     reportedAt: r.reported_at,
     resolvedAt: r.resolved_at,
-  }));
+  };
+}
+
+// ──────────────────────────────────────────────────────────
+// GET /api/outages/near?lat=&lon=&radius=
+// ──────────────────────────────────────────────────────────
+
+outageRoutes.get('/near', async (c) => {
+  const lat = Number(c.req.query('lat'));
+  const lon = Number(c.req.query('lon'));
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return c.json({ error: 'lat and lon are required' }, 400);
+  }
+  const radiusKm = Number(c.req.query('radius') ?? 40);
+  const limit = Math.min(Number(c.req.query('limit') ?? 5), 10);
+
+  const pollResults = await pollAreasNear(c.env, lat, lon, { limit, radiusKm });
+
+  const bb = boundingBox(lat, lon, radiusKm);
+  const { results: cebRows } = await c.env.DB.prepare(
+    `SELECT o.id, o.area_id, a.area_name, o.outage_type_id, o.num_customers,
+            o.timestamp, o.generated_time, o.start_time, o.end_time,
+            o.group_id, o.interruption_id, o.interruption_type,
+            o.polygon, o.centroid_lat, o.centroid_lon, o.status,
+            o.first_seen_at, o.last_seen_at, o.resolved_at
+       FROM ceb_outages o
+       LEFT JOIN areas a ON a.area_id = o.area_id
+      WHERE o.status = 'active'
+        AND o.centroid_lat BETWEEN ? AND ?
+        AND o.centroid_lon BETWEEN ? AND ?
+      LIMIT 500`,
+  )
+    .bind(bb.minLat, bb.maxLat, bb.minLon, bb.maxLon)
+    .all<CebOutageRow>();
+
+  const { results: reportRows } = await c.env.DB.prepare(
+    `SELECT r.id, r.user_id, r.area_id, r.area_name, r.lat, r.lon, r.type, r.status, r.description,
+            r.confirmed_by, r.reported_at, r.resolved_at, r.population_affected,
+            r.nearest_place, r.linked_ceb_id
+       FROM reports r
+      WHERE ${ACTIVE_REPORT_FILTER}
+        AND r.linked_ceb_id IS NULL
+        AND r.lat BETWEEN ? AND ?
+        AND r.lon BETWEEN ? AND ?
+      LIMIT 500`,
+  )
+    .bind(bb.minLat, bb.maxLat, bb.minLon, bb.maxLon)
+    .all<ReportRow>();
 
   return c.json({
-    ceb,
-    crowdsourced,
+    ceb: cebRows.map(mapCebRow),
+    crowdsourced: reportRows.map(mapReportRow),
     meta: {
       polledAreas: pollResults.map((r) => ({
         areaId: r.areaId,
@@ -186,7 +208,6 @@ outageRoutes.get('/', async (c) => {
   const lon = c.req.query('lon');
   const radiusKm = Number(c.req.query('radius') ?? 50);
 
-  // CEB outages
   const cebWhere: string[] = ['o.status = ?'];
   const cebBinds: unknown[] = [status];
   if (areaId) {
@@ -200,49 +221,22 @@ outageRoutes.get('/', async (c) => {
     cebBinds.push(bb.minLat, bb.maxLat, bb.minLon, bb.maxLon);
   }
 
-  const cebSql = `
-    SELECT o.id, o.area_id, a.area_name, o.outage_type_id, o.num_customers,
-           o.timestamp, o.generated_time, o.start_time, o.end_time,
-           o.group_id, o.interruption_id, o.interruption_type,
-           o.polygon, o.centroid_lat, o.centroid_lon, o.status,
-           o.first_seen_at, o.last_seen_at, o.resolved_at
-      FROM ceb_outages o
-      LEFT JOIN areas a ON a.area_id = o.area_id
-     WHERE ${cebWhere.join(' AND ')}
-     ORDER BY o.first_seen_at DESC
-     LIMIT 500
-  `;
-  const { results: cebRows } = await c.env.DB.prepare(cebSql)
+  const { results: cebRows } = await c.env.DB.prepare(
+    `SELECT o.id, o.area_id, a.area_name, o.outage_type_id, o.num_customers,
+            o.timestamp, o.generated_time, o.start_time, o.end_time,
+            o.group_id, o.interruption_id, o.interruption_type,
+            o.polygon, o.centroid_lat, o.centroid_lon, o.status,
+            o.first_seen_at, o.last_seen_at, o.resolved_at
+       FROM ceb_outages o
+       LEFT JOIN areas a ON a.area_id = o.area_id
+      WHERE ${cebWhere.join(' AND ')}
+      ORDER BY o.first_seen_at DESC
+      LIMIT 500`,
+  )
     .bind(...cebBinds)
     .all<CebOutageRow>();
 
-  const ceb = cebRows.map((r) => ({
-    id: r.id,
-    source: 'ceb' as const,
-    areaId: r.area_id,
-    areaName: r.area_name,
-    outageTypeId: r.outage_type_id,
-    type: outageTypeLabel(r.outage_type_id),
-    numCustomers: r.num_customers,
-    timestamp: r.timestamp,
-    generatedTime: r.generated_time,
-    startTime: r.start_time,
-    endTime: r.end_time,
-    groupId: r.group_id,
-    interruptionId: r.interruption_id,
-    interruptionType: r.interruption_type,
-    centroidLat: r.centroid_lat,
-    centroidLon: r.centroid_lon,
-    polygon: r.polygon ? JSON.parse(r.polygon) : [],
-    status: r.status,
-    firstSeenAt: r.first_seen_at,
-    lastSeenAt: r.last_seen_at,
-    resolvedAt: r.resolved_at,
-  }));
-
-  // Crowd reports — show everything active that's NOT already linked to
-  // a CEB outage (those get represented via the CEB row's confirmed_by).
-  const reportWhere: string[] = ["r.status = 'active'", 'r.linked_ceb_id IS NULL'];
+  const reportWhere: string[] = [ACTIVE_REPORT_FILTER, 'r.linked_ceb_id IS NULL'];
   const reportBinds: unknown[] = [];
   if (areaId) {
     reportWhere.push('r.area_id = ?');
@@ -255,39 +249,22 @@ outageRoutes.get('/', async (c) => {
     reportBinds.push(bb.minLat, bb.maxLat, bb.minLon, bb.maxLon);
   }
 
-  const reportSql = `
-    SELECT r.id, r.area_id, r.area_name, r.lat, r.lon, r.type, r.status,
-           r.description, r.confirmed_by, r.reported_at, r.resolved_at,
-           r.population_affected, r.nearest_place, r.linked_ceb_id
-      FROM reports r
-     WHERE ${reportWhere.join(' AND ')}
-     ORDER BY r.reported_at DESC
-     LIMIT 500
-  `;
-  const { results: reportRows } = await c.env.DB.prepare(reportSql)
+  const { results: reportRows } = await c.env.DB.prepare(
+    `SELECT r.id, r.user_id, r.area_id, r.area_name, r.lat, r.lon, r.type, r.status,
+            r.description, r.confirmed_by, r.reported_at, r.resolved_at,
+            r.population_affected, r.nearest_place, r.linked_ceb_id
+       FROM reports r
+      WHERE ${reportWhere.join(' AND ')}
+      ORDER BY r.reported_at DESC
+      LIMIT 500`,
+  )
     .bind(...reportBinds)
     .all<ReportRow>();
 
-  const crowdsourced = reportRows.map((r) => ({
-    id: r.id,
-    source: 'crowdsourced' as const,
-    areaId: r.area_id,
-    areaName: r.area_name,
-    type: r.type,
-    status: r.status,
-    description: r.description,
-    lat: r.lat,
-    lon: r.lon,
-    centroidLat: r.lat,
-    centroidLon: r.lon,
-    confirmedBy: r.confirmed_by,
-    populationAffected: r.population_affected,
-    nearestPlace: r.nearest_place,
-    reportedAt: r.reported_at,
-    resolvedAt: r.resolved_at,
-  }));
-
-  return c.json({ ceb, crowdsourced });
+  return c.json({
+    ceb: cebRows.map(mapCebRow),
+    crowdsourced: reportRows.map(mapReportRow),
+  });
 });
 
 // ──────────────────────────────────────────────────────────
@@ -310,6 +287,33 @@ outageRoutes.post('/report', async (c) => {
   const type = body.type ?? 'unplanned';
   const description = body.description?.slice(0, 500) ?? null;
   const device = deviceId(c);
+  const dName = deviceName(c);
+
+  // 0. Duplicate prevention: reject if this device already has an
+  //    active report within DEDUPE_RADIUS_KM in the last 24 h.
+  const dedupeBb = boundingBox(lat, lon, DEDUPE_RADIUS_KM);
+  const { results: myActive } = await c.env.DB.prepare(
+    `SELECT id, lat, lon, reported_at FROM reports
+      WHERE user_id = ?
+        AND ${ACTIVE_REPORT_FILTER.replace(/r\./g, '')}
+        AND lat BETWEEN ? AND ?
+        AND lon BETWEEN ? AND ?`,
+  )
+    .bind(device, dedupeBb.minLat, dedupeBb.maxLat, dedupeBb.minLon, dedupeBb.maxLon)
+    .all<{ id: string; lat: number; lon: number; reported_at: string }>();
+  for (const row of myActive) {
+    const dist = haversineKm(lat, lon, row.lat, row.lon);
+    if (dist <= DEDUPE_RADIUS_KM) {
+      return c.json(
+        {
+          error: 'duplicate',
+          message: 'You already reported a power cut at this location recently.',
+          existingId: row.id,
+        },
+        409,
+      );
+    }
+  }
 
   // 1. Enrich in parallel with GeoPop
   const geopop = new GeoPopService(c.env.GEOPOP_URL);
@@ -342,7 +346,10 @@ outageRoutes.post('/report', async (c) => {
     }
   }
 
-  // 3. Insert report
+  // 3. Upsert the user so the leaderboard has their current name
+  await touchUser(c.env, device, dName);
+
+  // 4. Insert report
   const reportId = crypto.randomUUID();
   await c.env.DB.prepare(
     `INSERT INTO reports (
@@ -366,7 +373,7 @@ outageRoutes.post('/report', async (c) => {
     )
     .run();
 
-  // 4. If linked, bump the CEB outage's confirmation count via confirmations table
+  // 5. If linked, bump the CEB outage's confirmation count
   if (linkedCebId) {
     await c.env.DB.prepare(
       `INSERT OR IGNORE INTO confirmations (outage_id, user_id, confirmed_at)
@@ -376,19 +383,26 @@ outageRoutes.post('/report', async (c) => {
       .run();
   }
 
-  return c.json({
-    id: reportId,
-    lat,
-    lon,
-    type,
-    description,
-    nearestPlace: reverse?.placeName ?? null,
-    displayName: reverse?.displayName ?? null,
-    populationAffected: exposure?.totalPopulation ?? null,
-    linkedCebId,
-    linkedAreaId,
-    fused: linkedCebId !== null,
-  }, 201);
+  // 6. Broadcast to connected clients (fire-and-forget)
+  void broadcast(c.env, { type: 'report:created', id: reportId, lat, lon });
+
+  return c.json(
+    {
+      id: reportId,
+      lat,
+      lon,
+      type,
+      description,
+      nearestPlace: reverse?.placeName ?? null,
+      displayName: reverse?.displayName ?? null,
+      populationAffected: exposure?.totalPopulation ?? null,
+      linkedCebId,
+      linkedAreaId,
+      fused: linkedCebId !== null,
+      expiresInHours: REPORT_TTL_HOURS,
+    },
+    201,
+  );
 });
 
 // ──────────────────────────────────────────────────────────
@@ -398,7 +412,6 @@ outageRoutes.post('/report', async (c) => {
 outageRoutes.get('/:id', async (c) => {
   const id = c.req.param('id');
 
-  // Try CEB first
   const cebRow = await c.env.DB.prepare(
     `SELECT o.*, a.area_name
        FROM ceb_outages o
@@ -416,52 +429,17 @@ outageRoutes.get('/:id', async (c) => {
       .first<{ count: number }>();
 
     return c.json({
-      id: cebRow.id,
-      source: 'ceb',
-      areaId: cebRow.area_id,
-      areaName: cebRow.area_name,
-      type: outageTypeLabel(cebRow.outage_type_id),
-      outageTypeId: cebRow.outage_type_id,
-      numCustomers: cebRow.num_customers,
-      timestamp: cebRow.timestamp,
-      startTime: cebRow.start_time,
-      endTime: cebRow.end_time,
-      centroidLat: cebRow.centroid_lat,
-      centroidLon: cebRow.centroid_lon,
-      polygon: cebRow.polygon ? JSON.parse(cebRow.polygon) : [],
-      status: cebRow.status,
-      firstSeenAt: cebRow.first_seen_at,
-      resolvedAt: cebRow.resolved_at,
+      ...mapCebRow(cebRow),
       confirmedBy: confirmations?.count ?? 0,
     });
   }
 
-  // Otherwise try reports
-  const reportRow = await c.env.DB.prepare(
-    `SELECT * FROM reports WHERE id = ?`,
-  )
+  const reportRow = await c.env.DB.prepare(`SELECT * FROM reports WHERE id = ?`)
     .bind(id)
     .first<ReportRow>();
 
   if (reportRow) {
-    return c.json({
-      id: reportRow.id,
-      source: 'crowdsourced',
-      areaId: reportRow.area_id,
-      areaName: reportRow.area_name,
-      type: reportRow.type,
-      status: reportRow.status,
-      description: reportRow.description,
-      lat: reportRow.lat,
-      lon: reportRow.lon,
-      centroidLat: reportRow.lat,
-      centroidLon: reportRow.lon,
-      confirmedBy: reportRow.confirmed_by,
-      populationAffected: reportRow.population_affected,
-      nearestPlace: reportRow.nearest_place,
-      reportedAt: reportRow.reported_at,
-      resolvedAt: reportRow.resolved_at,
-    });
+    return c.json(mapReportRow(reportRow));
   }
 
   return c.json({ error: 'not found' }, 404);
@@ -474,8 +452,10 @@ outageRoutes.get('/:id', async (c) => {
 outageRoutes.post('/:id/confirm', async (c) => {
   const id = c.req.param('id');
   const device = deviceId(c);
+  const dName = deviceName(c);
 
-  // Dedupe via (report_id, user_id) PK
+  await touchUser(c.env, device, dName);
+
   const result = await c.env.DB.prepare(
     `INSERT OR IGNORE INTO confirmations (outage_id, user_id, confirmed_at)
      VALUES (?, ?, datetime('now'))`,
@@ -484,8 +464,6 @@ outageRoutes.post('/:id/confirm', async (c) => {
     .run();
 
   const inserted = (result.meta.changes ?? 0) > 0;
-
-  // If this was a crowd report, bump its confirmed_by count
   if (inserted) {
     await c.env.DB.prepare(
       `UPDATE reports SET confirmed_by = confirmed_by + 1 WHERE id = ?`,
@@ -504,31 +482,21 @@ outageRoutes.post('/:id/confirm', async (c) => {
 });
 
 // ──────────────────────────────────────────────────────────
-// POST /api/outages/:id/resolve — mark as "power's back!"
+// POST /api/outages/:id/resolve — owner marks "power's back"
 // ──────────────────────────────────────────────────────────
 
 outageRoutes.post('/:id/resolve', async (c) => {
   const id = c.req.param('id');
+  const device = deviceId(c);
 
-  // Resolving a CEB outage is authoritative (it replaces ground truth),
-  // so require at least 3 crowd signals agreeing. For a crowd report,
-  // the first resolve wins.
-  const cebRow = await c.env.DB.prepare(
-    `SELECT id, status FROM ceb_outages WHERE id = ?`,
-  )
+  const cebRow = await c.env.DB.prepare(`SELECT id, status FROM ceb_outages WHERE id = ?`)
     .bind(id)
     .first<{ id: string; status: string }>();
-
   if (cebRow) {
-    if (cebRow.status !== 'active') {
-      return c.json({ id, alreadyResolved: true });
-    }
-    // Keep CEB as ground truth; do not flip status here.
-    // Instead count this as a confirmation-of-resolution via a separate
-    // report of type='restored'.
     return c.json(
       {
         id,
+        error: 'ceb_outage',
         note: 'CEB outages are resolved by the polling engine. Submit a restored-type report instead.',
       },
       409,
@@ -536,12 +504,15 @@ outageRoutes.post('/:id/resolve', async (c) => {
   }
 
   const reportRow = await c.env.DB.prepare(
-    `SELECT id, status, lat, lon, area_id FROM reports WHERE id = ?`,
+    `SELECT id, user_id, status, lat, lon, area_id FROM reports WHERE id = ?`,
   )
     .bind(id)
-    .first<{ id: string; status: string; lat: number; lon: number; area_id: string | null }>();
+    .first<{ id: string; user_id: string | null; status: string; lat: number; lon: number; area_id: string | null }>();
 
   if (!reportRow) return c.json({ error: 'not found' }, 404);
+  if (reportRow.user_id !== device) {
+    return c.json({ error: 'forbidden', message: 'Only the reporter can resolve this entry.' }, 403);
+  }
   if (reportRow.status === 'resolved') return c.json({ id, alreadyResolved: true });
 
   const resolvedAt = new Date().toISOString();
@@ -564,5 +535,38 @@ outageRoutes.post('/:id/resolve', async (c) => {
     ).bind(historyId, resolvedAt, resolvedAt, id),
   ]);
 
+  void broadcast(c.env, { type: 'report:resolved', id });
+
   return c.json({ id, resolvedAt });
+});
+
+// ──────────────────────────────────────────────────────────
+// DELETE /api/outages/:id — owner deletes their report (soft delete)
+// ──────────────────────────────────────────────────────────
+
+outageRoutes.delete('/:id', async (c) => {
+  const id = c.req.param('id');
+  const device = deviceId(c);
+
+  const reportRow = await c.env.DB.prepare(
+    `SELECT id, user_id, status FROM reports WHERE id = ?`,
+  )
+    .bind(id)
+    .first<{ id: string; user_id: string | null; status: string }>();
+
+  if (!reportRow) return c.json({ error: 'not found' }, 404);
+  if (reportRow.user_id !== device) {
+    return c.json({ error: 'forbidden', message: 'Only the reporter can delete this entry.' }, 403);
+  }
+  if (reportRow.status === 'deleted') return c.json({ id, alreadyDeleted: true });
+
+  await c.env.DB.prepare(
+    `UPDATE reports SET status = 'deleted', resolved_at = datetime('now') WHERE id = ?`,
+  )
+    .bind(id)
+    .run();
+
+  void broadcast(c.env, { type: 'report:deleted', id });
+
+  return c.json({ id, deleted: true });
 });

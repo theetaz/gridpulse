@@ -6,7 +6,7 @@ import { HomePage } from '@/pages/HomePage';
 import { MapPage } from '@/pages/MapPage';
 import { FeedPage } from '@/pages/FeedPage';
 import { StatsPage } from '@/pages/StatsPage';
-import { ReportSheet } from '@/components/outage/ReportSheet';
+import { ReportPage } from '@/components/outage/ReportPage';
 import { OutageDetailSheet } from '@/components/outage/OutageDetailSheet';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Toaster } from '@/components/ui/sonner';
@@ -31,7 +31,7 @@ export function AppShell() {
           </Suspense>
         </main>
         <BottomNav />
-        <ReportSheet />
+        <ReportPage />
         <OutageDetailSheet />
         <Toaster position="top-center" />
       </div>

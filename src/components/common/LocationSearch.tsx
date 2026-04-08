@@ -50,7 +50,6 @@ export function LocationSearch() {
         <div className="relative">
           <Search className="text-muted-foreground pointer-events-none absolute left-2.5 top-2.5 h-4 w-4" />
           <Input
-            autoFocus
             placeholder={t('search.placeholder')}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -87,7 +86,14 @@ export function LocationSearch() {
             <button
               key={r.placeId}
               type="button"
-              onClick={() => {
+              style={{ touchAction: 'manipulation' }}
+              onPointerDown={(e) => {
+                // Select immediately on pointerdown so the soft keyboard's
+                // collapse animation can't shift the button out from under
+                // the user's finger before the click fires.
+                e.preventDefault();
+                e.stopPropagation();
+                (document.activeElement as HTMLElement | null)?.blur();
                 setManual({
                   lat: r.lat,
                   lon: r.lon,
@@ -97,7 +103,7 @@ export function LocationSearch() {
                 setOpen(false);
                 setQuery('');
               }}
-              className="border-border hover:bg-accent flex w-full items-center gap-3 border-b p-3 text-left last:border-0"
+              className="border-border hover:bg-accent active:bg-accent flex w-full items-center gap-3 border-b p-3 text-left last:border-0"
             >
               <MapPin className="text-muted-foreground h-4 w-4 shrink-0" />
               <div className="min-w-0 flex-1">

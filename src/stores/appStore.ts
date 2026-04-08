@@ -17,7 +17,7 @@ interface AppState {
   selectedOutageId: string | null;
   selectOutage: (id: string | null) => void;
 
-  reportSheetOpen: boolean;
+  reportPageOpen: boolean;
   openReportSheet: () => void;
   closeReportSheet: () => void;
 
@@ -42,9 +42,9 @@ export const useAppStore = create<AppState>()(
       selectedOutageId: null,
       selectOutage: (id) => set({ selectedOutageId: id }),
 
-      reportSheetOpen: false,
-      openReportSheet: () => set({ reportSheetOpen: true }),
-      closeReportSheet: () => set({ reportSheetOpen: false }),
+      reportPageOpen: false,
+      openReportSheet: () => set({ reportPageOpen: true }),
+      closeReportSheet: () => set({ reportPageOpen: false }),
 
       showCeb: true,
       showCrowd: true,

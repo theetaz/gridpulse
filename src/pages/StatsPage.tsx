@@ -14,6 +14,7 @@ import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recha
 import { Skeleton } from '@/components/ui/skeleton';
 import { useIslandAnalytics, useAreaAnalytics, useAreas } from '@/hooks/useAnalytics';
 import { formatNumber, formatDuration } from '@/lib/format';
+import { LeaderboardSection } from '@/components/stats/LeaderboardSection';
 
 export function StatsPage() {
   const { t } = useTranslation();
@@ -23,10 +24,12 @@ export function StatsPage() {
   const area = useAreaAnalytics(areaId);
 
   return (
-    <div className="space-y-6 p-4">
+    <div className="space-y-5 p-3">
       <header>
-        <h2 className="text-xl font-bold tracking-tight">{t('stats.title')}</h2>
+        <h2 className="text-lg font-bold tracking-tight">{t('stats.title')}</h2>
       </header>
+
+      <LeaderboardSection />
 
       {/* Island-wide */}
       <section className="space-y-3">
