@@ -30,13 +30,13 @@ export function LocationSearch() {
       <DialogTrigger asChild>
         <button
           type="button"
-          className="border-border bg-muted/30 hover:bg-accent flex h-9 w-full items-center gap-2 border px-3 text-left text-xs transition"
+          className="border-border bg-muted/20 hover:bg-accent flex h-7 w-full items-center gap-1.5 border px-2 text-left text-[11px] transition"
         >
-          <MapPin className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
+          <MapPin className="text-muted-foreground h-3 w-3 shrink-0" />
           <span className="min-w-0 flex-1 truncate font-medium">
             {manual ? manual.name : t('search.auto')}
           </span>
-          <span className="text-muted-foreground shrink-0 text-[10px]">
+          <span className="text-muted-foreground shrink-0 text-[9px]">
             {t('search.change')}
           </span>
         </button>

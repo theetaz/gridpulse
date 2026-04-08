@@ -5,7 +5,7 @@ import { useLocation } from '@/hooks/useLocation';
 export function HomePage() {
   const { lat, lon } = useLocation();
   return (
-    <div className="space-y-4 p-4">
+    <div className="space-y-3 p-3">
       <StatusCard />
       <NearbyOutages lat={lat} lon={lon} />
     </div>

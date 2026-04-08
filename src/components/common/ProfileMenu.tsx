@@ -77,7 +77,7 @@ export function ProfileMenu() {
     <>
       <button
         type="button"
-        className={`flex h-9 w-9 shrink-0 items-center justify-center text-xs font-bold text-white ${bg}`}
+        className={`mx-0.5 flex h-7 w-7 shrink-0 items-center justify-center text-[10px] font-bold text-white ${bg}`}
         onClick={() => setOpen(true)}
         aria-label={`${t('profile.title')}: ${name}`}
       >

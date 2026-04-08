@@ -9,21 +9,14 @@ import { useAppStore } from '@/stores/appStore';
 import { relativeTime, formatDistance, formatDuration, formatNumber } from '@/lib/format';
 
 /**
- * The single most important UI element in the app — answers "is my
- * power on or off?" the moment the user opens the app.
+ * The single most important UI element in the app — answers
+ * "is my power on or off?" the moment the user opens the app.
  *
- * Design choices:
- *  - One large, unambiguous statement (big heading, full-color background)
- *  - Full-width context rows with icon prefixes instead of a cramped
- *    multi-column stat grid (prior version truncated "Restoratio...",
- *    "1 homes...", "33 minutes..." at real mobile widths)
- *  - One primary CTA that dominates the card. Context-aware label:
- *    "My power is out too" when an outage is detected nearby,
- *    "Report a power cut" when things look fine. Either way, it opens
- *    the report drawer pre-filled with the current location, and the
- *    fusion logic on the server handles the "confirm vs new" decision.
- *  - Subtle social proof ("1 neighbor confirmed") reminds users their
- *    contribution is not in a void.
+ * Design intent: tight but readable. Compact padding, small headline
+ * (text-xl), single inline meta row instead of stacked stat rows, and
+ * one unambiguous primary CTA button at the bottom. No truncation —
+ * the old 3-column stat grid was the source of every ellipsis on real
+ * phones, so it's gone.
  */
 export function StatusCard() {
   const { t } = useTranslation();
@@ -34,10 +27,10 @@ export function StatusCard() {
 
   if (geoError) {
     return (
-      <div className="border-border bg-muted/30 border p-6 text-center">
-        <MapPin className="text-muted-foreground mx-auto h-8 w-8" />
-        <p className="mt-3 text-sm font-medium">{t('home.location_error')}</p>
-        <Button size="sm" variant="outline" className="mt-3" onClick={refresh}>
+      <div className="border-border bg-muted/30 border p-4 text-center">
+        <MapPin className="text-muted-foreground mx-auto h-6 w-6" />
+        <p className="mt-2 text-xs font-medium">{t('home.location_error')}</p>
+        <Button size="sm" variant="outline" className="mt-2 h-7 px-3 text-[11px]" onClick={refresh}>
           {t('home.location_retry')}
         </Button>
       </div>
@@ -46,11 +39,11 @@ export function StatusCard() {
 
   if (geoLoading || lat == null || lon == null || isLoading || !data) {
     return (
-      <div className="border-border space-y-3 border p-6">
-        <Skeleton className="h-5 w-24" />
-        <Skeleton className="h-10 w-48" />
-        <Skeleton className="h-4 w-36" />
-        <Skeleton className="mt-4 h-12 w-full" />
+      <div className="border-border space-y-2 border p-4">
+        <Skeleton className="h-4 w-20" />
+        <Skeleton className="h-7 w-40" />
+        <Skeleton className="h-3 w-28" />
+        <Skeleton className="mt-2 h-10 w-full" />
       </div>
     );
   }
@@ -60,99 +53,86 @@ export function StatusCard() {
 
   return (
     <motion.section
-      initial={{ opacity: 0, y: 8 }}
+      initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25 }}
+      transition={{ duration: 0.2 }}
       className={`border-border relative overflow-hidden border ${
         isOut ? 'bg-red-500/5' : 'bg-emerald-500/5'
       }`}
     >
-      {/* Top strip: status icon + place name */}
-      <div className="flex items-start justify-between p-5 pb-3">
+      {/* Top: status icon + place label */}
+      <div className="flex items-start justify-between gap-2 px-4 pt-4">
         <div
-          className={`flex h-12 w-12 items-center justify-center ${
+          className={`flex h-9 w-9 shrink-0 items-center justify-center ${
             isOut ? 'bg-red-500' : 'bg-emerald-500'
           } text-white`}
         >
-          {isOut ? <ZapOff className="h-6 w-6" /> : <Zap className="h-6 w-6" />}
+          {isOut ? <ZapOff className="h-4 w-4" /> : <Zap className="h-4 w-4" />}
         </div>
-        <div className="text-right">
-          <p className="text-muted-foreground text-[10px] uppercase tracking-wide">
+        <div className="min-w-0 text-right">
+          <p className="text-muted-foreground text-[9px] uppercase tracking-wide leading-none">
             {source === 'manual' ? t('home.place_label_manual') : t('home.place_label')}
           </p>
-          <p className="mt-0.5 max-w-[12rem] truncate text-xs font-medium">
+          <p className="mt-0.5 truncate text-[11px] font-medium">
             {placeName ?? data.place?.name ?? '—'}
           </p>
         </div>
       </div>
 
-      {/* Big statement */}
-      <div className="px-5 pb-4">
-        <h2 className="text-3xl font-bold leading-tight tracking-tight">
+      {/* Headline + subtitle */}
+      <div className="px-4 pt-2.5">
+        <h2 className="text-xl font-bold leading-tight tracking-tight">
           {isOut ? t('home.outage_title') : t('home.powered_title')}
         </h2>
-        <p className="text-muted-foreground mt-1 text-sm">
+        <p className="text-muted-foreground mt-0.5 text-[11px]">
           {isOut && nearest
             ? t('home.outage_subtitle', { distance: formatDistance(nearest.distanceKm) })
             : t('home.powered_subtitle')}
         </p>
       </div>
 
-      {/* Context rows — full width, never truncate */}
+      {/* Inline meta row — three chips in one line, never truncates because
+          the values are short (relative time, count, duration) */}
       {isOut && nearest && (
-        <div className="border-border space-y-0 border-t border-b">
-          <ContextRow
-            icon={<Clock className="h-4 w-4" />}
-            label={t('home.started')}
-            value={relativeTime(nearest.startedAt) || '—'}
+        <div className="text-muted-foreground flex items-center gap-3 px-4 pt-2.5 text-[11px]">
+          <MetaChip icon={<Clock className="h-3 w-3" />} value={relativeTime(nearest.startedAt) || '—'} />
+          <MetaChip
+            icon={<Users className="h-3 w-3" />}
+            value={`${formatNumber(nearest.affected)} ${nearest.affected === 1 ? t('home.affected_one_short') : t('home.affected_other_short')}`}
           />
-          <ContextRow
-            icon={<Users className="h-4 w-4" />}
-            label={
-              nearest.affected === 1
-                ? t('home.affected_one', { count: nearest.affected })
-                : t('home.affected_other', { count: nearest.affected })
-            }
-            value={formatNumber(nearest.affected)}
-          />
-          <ContextRow
-            icon={<Timer className="h-4 w-4" />}
-            label={t('home.est_back_label')}
-            value={
-              data.estRestoreMins ? formatDuration(data.estRestoreMins) : t('home.no_estimate')
-            }
+          <MetaChip
+            icon={<Timer className="h-3 w-3" />}
+            value={data.estRestoreMins ? formatDuration(data.estRestoreMins) : '—'}
           />
         </div>
       )}
 
-      {/* Primary CTA — huge and unambiguous */}
-      <div className="p-5 pt-4">
+      {/* Primary CTA */}
+      <div className="px-4 pb-3 pt-3">
         <Button
-          size="lg"
-          className={`h-14 w-full text-base font-bold ${
-            isOut
-              ? 'bg-red-600 text-white hover:bg-red-700'
-              : 'bg-primary text-primary-foreground'
+          size="sm"
+          className={`h-10 w-full text-sm font-bold ${
+            isOut ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-primary text-primary-foreground'
           }`}
           onClick={openReport}
         >
           {isOut ? (
             <>
-              <AlertTriangle className="mr-2 h-5 w-5" />
+              <AlertTriangle className="mr-1.5 h-4 w-4" />
               {t('home.cta_power_out_too')}
             </>
           ) : (
             <>
-              <ZapOff className="mr-2 h-5 w-5" />
+              <ZapOff className="mr-1.5 h-4 w-4" />
               {t('home.cta_report_power_cut')}
             </>
           )}
         </Button>
 
         {isOut && nearest && (
-          <div className="mt-3 flex items-center justify-between text-xs">
-            <div className="text-muted-foreground flex items-center gap-1.5">
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+          <div className="mt-2 flex items-center justify-between text-[10px]">
+            <div className="text-muted-foreground flex items-center gap-1">
+              <CheckCircle2 className="h-3 w-3 text-emerald-500" />
               <span>{t('home.neighbors_confirmed', { count: nearest.affected })}</span>
             </div>
             <button
@@ -169,22 +149,11 @@ export function StatusCard() {
   );
 }
 
-function ContextRow({
-  icon,
-  label,
-  value,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-}) {
+function MetaChip({ icon, value }: { icon: React.ReactNode; value: string }) {
   return (
-    <div className="border-border flex items-center justify-between gap-3 border-b px-5 py-3 last:border-b-0">
-      <div className="text-muted-foreground flex items-center gap-2 text-xs">
-        {icon}
-        <span>{label}</span>
-      </div>
-      <span className="text-sm font-bold">{value}</span>
+    <div className="flex items-center gap-1">
+      {icon}
+      <span className="text-foreground font-medium">{value}</span>
     </div>
   );
 }

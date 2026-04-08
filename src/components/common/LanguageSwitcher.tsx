@@ -29,13 +29,13 @@ export function LanguageSwitcher() {
     <Button
       variant="ghost"
       size="icon"
-      className="h-9 w-9 shrink-0"
+      className="h-8 w-8 shrink-0"
       onClick={next}
       aria-label={`Language: ${current.toUpperCase()}`}
     >
       <div className="relative">
-        <Languages className="h-4 w-4" />
-        <span className="text-primary absolute -bottom-2.5 left-1/2 -translate-x-1/2 text-[9px] font-bold">
+        <Languages className="h-3.5 w-3.5" />
+        <span className="text-primary absolute -bottom-2 left-1/2 -translate-x-1/2 text-[8px] font-bold leading-none">
           {SHORT[current]}
         </span>
       </div>
