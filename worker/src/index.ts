@@ -66,16 +66,22 @@ app.route('/api/geocode', geocodeRoutes);
 app.route('/api/me', meRoutes);
 app.route('/api/leaderboard', leaderboardRoutes);
 
-// WebSocket upgrade → Durable Object (one room per CEB area)
+// WebSocket upgrade → Durable Object (one room per CEB area).
+//
+// IMPORTANT: we forward the RAW Request (c.req.raw) rather than
+// constructing a new one. Building a new Request with just headers
+// drops the Cloudflare-internal WebSocket upgrade metadata, and the
+// DO never gets a proper upgrade — the socket never opens and the
+// presence broadcast never reaches the client.
 app.get('/ws/:areaId', async (c) => {
+  const upgrade = c.req.header('upgrade');
+  if (upgrade !== 'websocket') {
+    return c.text('Expected WebSocket upgrade', 426);
+  }
   const areaId = c.req.param('areaId');
   const id = c.env.AREA_ROOM.idFromName(areaId);
-  const room = c.env.AREA_ROOM.get(id);
-  return room.fetch(
-    new Request('https://internal/ws', {
-      headers: c.req.raw.headers,
-    }),
-  );
+  const stub = c.env.AREA_ROOM.get(id);
+  return stub.fetch(c.req.raw);
 });
 
 export default {

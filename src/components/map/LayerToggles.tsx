@@ -3,13 +3,10 @@ import { Radio, Users, Star, Eye, EyeOff } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 
 /**
- * Three-row layer toggle floating top-left of the map:
- *   - CEB data (red)
- *   - Reports (blue — everyone else's crowd reports)
- *   - Mine (purple — your own reports, always visible on its own
- *     switch so you can see them even when Reports is off)
+ * Layer visibility toggles — our own control, separate from MapCN's
+ * built-in MapControls (which handles zoom/compass/locate).
  */
-export function MapControls() {
+export function LayerToggles() {
   const { t } = useTranslation();
   const showCeb = useAppStore((s) => s.showCeb);
   const showCrowd = useAppStore((s) => s.showCrowd);

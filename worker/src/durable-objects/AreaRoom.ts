@@ -19,17 +19,20 @@ export class AreaRoom implements DurableObject {
   ) {}
 
   async fetch(request: Request): Promise<Response> {
-    const url = new URL(request.url);
-
-    if (url.pathname === '/ws') {
+    // WebSocket upgrade — detect via the Upgrade header instead of
+    // the path so the DO works regardless of which route the Worker
+    // forwarded from.
+    if (request.headers.get('upgrade') === 'websocket') {
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair);
       this.state.acceptWebSocket(server);
       this.sessions.set(server, {});
-      // Tell the newcomer the current count + notify everyone
+      // Tell everyone (including the newcomer) the updated count
       this.broadcastPresence();
       return new Response(null, { status: 101, webSocket: client });
     }
+
+    const url = new URL(request.url);
 
     if (url.pathname === '/broadcast' && request.method === 'POST') {
       const data = await request.json<{ type: string; payload: unknown }>();

@@ -1,23 +1,30 @@
-import { useEffect, useRef, useState } from 'react';
-import maplibregl, { type GeoJSONSource } from 'maplibre-gl';
+import { useEffect, useMemo, useState } from 'react';
+import type { GeoJSONSource } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useTranslation } from 'react-i18next';
+import {
+  Map as MapCnMap,
+  MapMarker,
+  MarkerContent,
+  MarkerPopup,
+  MapControls as MapCnControls,
+  useMap,
+} from '@/components/ui/map';
 import { useOutages } from '@/hooks/useOutages';
 import { useLocation } from '@/hooks/useLocation';
 import { useAppStore } from '@/stores/appStore';
-import { useTheme } from '@/components/theme-provider';
-import { buildOutageGeoJSON } from '@/lib/geo-helpers';
-import { MapControls } from './MapControls';
-import { PresencePill } from './PresencePill';
 import { getDeviceId } from '@/lib/profile';
+import { buildOutageGeoJSON } from '@/lib/geo-helpers';
+import { LayerToggles } from './LayerToggles';
+import { PresencePill } from './PresencePill';
 import {
-  buildMarkerElement,
-  ensureMarkerStyles,
-  type MarkerKind,
-} from './markerIcons';
+  CebMarkerIcon,
+  CrowdMarkerIcon,
+  MineMarkerIcon,
+  HomeMarkerIcon,
+} from './markers';
 
-// When the user pans the map more than ~5 km from the last fetched
-// point, trigger a fresh /api/outages/near call for the new region.
+const SRI_LANKA_CENTER: [number, number] = [80.7, 7.8];
 const REFETCH_DISTANCE_KM = 5;
 
 function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -31,24 +38,18 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): nu
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-const SRI_LANKA_CENTER: [number, number] = [80.7, 7.8];
-const STYLE_LIGHT = 'https://tiles.openfreemap.org/styles/positron';
-const STYLE_DARK = 'https://tiles.openfreemap.org/styles/dark';
-
-const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
-
+/**
+ * MapCN-based outage map. All marker lifecycle is handled declaratively
+ * by MapCN's <MapMarker> component — we just render children per outage
+ * and MapCN diffs + positions them. No more hand-rolled marker bugs.
+ *
+ * The only thing we still touch via useMap() imperatively is:
+ *   - The GeoJSON source for CEB multi-point cluster polygons
+ *   - moveend listener for the pan-to-refetch flow
+ *   - flyTo when the user changes location
+ *   - triggerRepaint when the detail sheet closes
+ */
 export function OutageMap() {
-  const { t } = useTranslation();
-  const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<maplibregl.Map | null>(null);
-  const homeMarkerRef = useRef<maplibregl.Marker | null>(null);
-
-  // Track custom HTML markers by outage id so we can diff on updates
-  // rather than tearing down and rebuilding every frame.
-  const markerIndex = useRef<
-    Map<string, { marker: maplibregl.Marker; kind: MarkerKind }>
-  >(new Map());
-
   const location = useLocation();
   const [fetchCenter, setFetchCenter] = useState<{ lat: number; lon: number } | null>(null);
 
@@ -63,302 +64,252 @@ export function OutageMap() {
     limit: 6,
   });
 
-  const { theme } = useTheme();
   const selectOutage = useAppStore((s) => s.selectOutage);
   const selectedOutageId = useAppStore((s) => s.selectedOutageId);
   const showCeb = useAppStore((s) => s.showCeb);
   const showCrowd = useAppStore((s) => s.showCrowd);
   const showMine = useAppStore((s) => s.showMine);
 
-  // Initialize map once
-  useEffect(() => {
-    if (!containerRef.current || mapRef.current) return;
-    ensureMarkerStyles();
+  const deviceId = useMemo(() => getDeviceId(), []);
 
-    const isDark =
-      theme === 'dark' ||
-      (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-
-    const map = new maplibregl.Map({
-      container: containerRef.current,
-      style: isDark ? STYLE_DARK : STYLE_LIGHT,
-      center: SRI_LANKA_CENTER,
-      zoom: 7,
-      attributionControl: { compact: true },
-    });
-
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
-    map.addControl(
-      new maplibregl.GeolocateControl({
-        positionOptions: { enableHighAccuracy: true },
-        trackUserLocation: true,
-      }),
-      'top-right',
-    );
-
-    map.on('load', () => {
-      // CEB polygons (big cluster outages) stay as a data-driven layer
-      map.addSource('ceb-polygons', { type: 'geojson', data: EMPTY_FC });
-      map.addLayer({
-        id: 'ceb-polygons-fill',
-        type: 'fill',
-        source: 'ceb-polygons',
-        paint: {
-          'fill-color': ['get', 'color'],
-          'fill-opacity': 0.22,
-        },
-      });
-      map.addLayer({
-        id: 'ceb-polygons-line',
-        type: 'line',
-        source: 'ceb-polygons',
-        paint: {
-          'line-color': ['get', 'color'],
-          'line-width': 2,
-        },
-      });
-
-      // Click → open detail sheet (polygons only — points are HTML markers)
-      const onClick = (e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
-        const id = e.features?.[0]?.properties?.id as string | undefined;
-        if (id) selectOutage(id);
-      };
-      const onEnter = () => (map.getCanvas().style.cursor = 'pointer');
-      const onLeave = () => (map.getCanvas().style.cursor = '');
-      map.on('click', 'ceb-polygons-fill', onClick);
-      map.on('mouseenter', 'ceb-polygons-fill', onEnter);
-      map.on('mouseleave', 'ceb-polygons-fill', onLeave);
-
-      // Debounced pan → refetch
-      let debounceHandle: number | undefined;
-      map.on('moveend', () => {
-        if (debounceHandle != null) window.clearTimeout(debounceHandle);
-        debounceHandle = window.setTimeout(() => {
-          const c = map.getCenter();
-          setFetchCenter((prev) => {
-            if (!prev) return { lat: c.lat, lon: c.lng };
-            const moved = haversineKm(prev.lat, prev.lon, c.lat, c.lng);
-            return moved >= REFETCH_DISTANCE_KM ? { lat: c.lat, lon: c.lng } : prev;
-          });
-        }, 500);
-      });
-    });
-
-    mapRef.current = map;
-    return () => {
-      for (const { marker } of markerIndex.current.values()) marker.remove();
-      markerIndex.current.clear();
-      map.remove();
-      mapRef.current = null;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Push data into the map: polygons as a GeoJSON source, points as HTML markers
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !data) return;
-
-    const apply = () => {
-      const { polygons } = buildOutageGeoJSON(data.ceb, data.crowdsourced);
-      (map.getSource('ceb-polygons') as GeoJSONSource | undefined)?.setData(polygons);
-
-      // Reconcile HTML markers
-      const me = getDeviceId();
-      const next = new Map<
-        string,
-        { lat: number; lon: number; kind: MarkerKind; id: string }
-      >();
-
-      // CEB single-points (anything whose polygon has 1 vertex)
-      if (showCeb) {
-        for (const o of data.ceb) {
-          if (!o.polygon || o.polygon.length !== 1) continue;
-          next.set(o.id, {
-            id: o.id,
-            lat: o.polygon[0].lat,
-            lon: o.polygon[0].lon,
-            kind: 'ceb',
-          });
-        }
-      }
-
-      // Crowd reports split into "mine" and "others". Each has its own
-      // independent toggle so users can see just their own reports,
-      // just others', or both.
-      for (const r of data.crowdsourced) {
-        const isMine = r.userId === me;
-        if (isMine && !showMine) continue;
-        if (!isMine && !showCrowd) continue;
-        next.set(r.id, {
-          id: r.id,
-          lat: r.lat,
-          lon: r.lon,
-          kind: isMine ? 'mine' : 'crowd',
-        });
-      }
-
-      // Remove stale markers
-      for (const [id, entry] of markerIndex.current) {
-        const incoming = next.get(id);
-        if (!incoming || incoming.kind !== entry.kind) {
-          entry.marker.remove();
-          markerIndex.current.delete(id);
-        }
-      }
-
-      // Add new markers + reposition any existing ones
-      for (const { id, lat, lon, kind } of next.values()) {
-        const existing = markerIndex.current.get(id);
-        if (existing) {
-          existing.marker.setLngLat([lon, lat]);
-          continue;
-        }
-        const el = buildMarkerElement(kind);
-        el.addEventListener('click', (e) => {
-          e.stopPropagation();
-          selectOutage(id);
-        });
-        const marker = new maplibregl.Marker({ element: el })
-          .setLngLat([lon, lat])
-          .addTo(map);
-        markerIndex.current.set(id, { marker, kind });
-      }
-    };
-
-    if (map.isStyleLoaded()) apply();
-    else map.once('load', apply);
-  }, [data, selectOutage, showCeb, showCrowd, showMine]);
-
-  // User location marker — shown as a home icon, clickable to show a
-  // popup with the location name / coordinates.
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || location.lat == null || location.lon == null) return;
-    const coords: [number, number] = [location.lon, location.lat];
-
-    if (homeMarkerRef.current) {
-      homeMarkerRef.current.setLngLat(coords);
-    } else {
-      const el = buildMarkerElement('home');
-      const marker = new maplibregl.Marker({ element: el }).setLngLat(coords).addTo(map);
-      // Popup with the location name — MapLibre sync-positions it
-      // with the marker automatically.
-      const popup = new maplibregl.Popup({
-        offset: 20,
-        closeButton: false,
-        className: 'gp-home-popup',
-      });
-      el.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const label =
-          location.placeName ||
-          location.displayName ||
-          `${coords[1].toFixed(4)}, ${coords[0].toFixed(4)}`;
-        const sourceLabel =
-          location.source === 'manual'
-            ? t('map.home_manual')
-            : t('map.home_gps');
-        popup
-          .setLngLat(coords)
-          .setHTML(
-            `<div style="font-family: inherit; padding: 2px 4px;">
-               <div style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.7;">${sourceLabel}</div>
-               <div style="font-size: 12px; font-weight: 700; margin-top: 2px;">${escapeHtml(label)}</div>
-             </div>`,
-          )
-          .addTo(map);
-      });
-      homeMarkerRef.current = marker;
-    }
-    map.flyTo({ center: coords, zoom: 12, duration: 1500 });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.lat, location.lon, location.placeName, location.source]);
-
-  // Only the CEB *polygons* need visibility via setLayoutProperty.
-  // Individual markers are now added/removed by the data effect based
-  // on the flags, so we don't need to keep hidden markers around.
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    const apply = () => {
-      const cebVis = showCeb ? 'visible' : 'none';
-      if (map.getLayer('ceb-polygons-fill'))
-        map.setLayoutProperty('ceb-polygons-fill', 'visibility', cebVis);
-      if (map.getLayer('ceb-polygons-line'))
-        map.setLayoutProperty('ceb-polygons-line', 'visibility', cebVis);
-    };
-    if (map.isStyleLoaded()) apply();
-    else map.once('load', apply);
-  }, [showCeb]);
-
-  // Fix for the "marker ghost" bug: when the Radix Dialog detail sheet
-  // closes, it flips body.style.overflow off, which triggers a layout
-  // recalc that leaves MapLibre's marker transforms in a stale state —
-  // they look invisible until the user pans the map. Forcing a repaint
-  // + resize after the sheet closes restores them.
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    if (selectedOutageId === null) {
-      const t1 = window.setTimeout(() => {
-        map.resize();
-        map.triggerRepaint();
-      }, 60);
-      return () => window.clearTimeout(t1);
-    }
-  }, [selectedOutageId]);
-
-  // Theme change → swap basemap style
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    const isDark =
-      theme === 'dark' ||
-      (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-    map.setStyle(isDark ? STYLE_DARK : STYLE_LIGHT);
-    map.once('styledata', () => {
-      if (!map.getSource('ceb-polygons')) {
-        map.addSource('ceb-polygons', { type: 'geojson', data: EMPTY_FC });
-        map.addLayer({
-          id: 'ceb-polygons-fill',
-          type: 'fill',
-          source: 'ceb-polygons',
-          paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.22 },
-        });
-        map.addLayer({
-          id: 'ceb-polygons-line',
-          type: 'line',
-          source: 'ceb-polygons',
-          paint: { 'line-color': ['get', 'color'], 'line-width': 2 },
-        });
-      }
-      if (data) {
-        const { polygons } = buildOutageGeoJSON(data.ceb, data.crowdsourced);
-        (map.getSource('ceb-polygons') as GeoJSONSource | undefined)?.setData(polygons);
-      }
-    });
-  }, [theme, data]);
+  // Split crowd reports up front so we can render them in separate
+  // filtered groups (mine vs others).
+  const { cebSinglePoints, othersCrowd, myCrowd } = useMemo(() => {
+    const ceb = (data?.ceb ?? []).filter((o) => o.polygon && o.polygon.length === 1);
+    const crowd = data?.crowdsourced ?? [];
+    const mine = crowd.filter((r) => r.userId === deviceId);
+    const others = crowd.filter((r) => r.userId !== deviceId);
+    return { cebSinglePoints: ceb, othersCrowd: others, myCrowd: mine };
+  }, [data, deviceId]);
 
   return (
     <div className="relative h-full w-full">
-      <div ref={containerRef} className="h-full w-full" />
-      <MapControls />
+      <MapCnMap
+        center={SRI_LANKA_CENTER}
+        zoom={7}
+        styles={{
+          light: 'https://tiles.openfreemap.org/styles/positron',
+          dark: 'https://tiles.openfreemap.org/styles/dark',
+        }}
+        className="h-full w-full"
+      >
+        <MapCnControls position="top-right" />
+
+        {/* Imperative side-effects (polygon layer, pan refetch,
+            flyTo, repaint) live in child components so they can use
+            the useMap() hook. */}
+        <CebPolygonLayer
+          polygons={showCeb ? buildOutageGeoJSON(data?.ceb ?? [], []).polygons : emptyFc}
+        />
+        <ViewportTracker
+          onMove={(c) => {
+            setFetchCenter((prev) => {
+              if (!prev) return c;
+              const moved = haversineKm(prev.lat, prev.lon, c.lat, c.lon);
+              return moved >= REFETCH_DISTANCE_KM ? c : prev;
+            });
+          }}
+        />
+        {location.lat != null && location.lon != null && (
+          <AutoFlyTo lat={location.lat} lon={location.lon} />
+        )}
+        <RepaintOnCloseSheet selectedId={selectedOutageId} />
+
+        {/* Home marker — user's selected / GPS location */}
+        {location.lat != null && location.lon != null && (
+          <MapMarker longitude={location.lon} latitude={location.lat}>
+            <MarkerContent>
+              <HomeMarkerIcon />
+            </MarkerContent>
+            <MarkerPopup>
+              <HomePopupContent
+                source={location.source}
+                name={location.placeName ?? location.displayName}
+                lat={location.lat}
+                lon={location.lon}
+              />
+            </MarkerPopup>
+          </MapMarker>
+        )}
+
+        {/* CEB single-point outages */}
+        {showCeb &&
+          cebSinglePoints.map((o) => (
+            <MapMarker
+              key={o.id}
+              longitude={o.polygon[0].lon}
+              latitude={o.polygon[0].lat}
+              onClick={() => selectOutage(o.id)}
+            >
+              <MarkerContent>
+                <CebMarkerIcon />
+              </MarkerContent>
+            </MapMarker>
+          ))}
+
+        {/* Crowd reports from other users */}
+        {showCrowd &&
+          othersCrowd.map((r) => (
+            <MapMarker
+              key={r.id}
+              longitude={r.lon}
+              latitude={r.lat}
+              onClick={() => selectOutage(r.id)}
+            >
+              <MarkerContent>
+                <CrowdMarkerIcon />
+              </MarkerContent>
+            </MapMarker>
+          ))}
+
+        {/* Your own reports */}
+        {showMine &&
+          myCrowd.map((r) => (
+            <MapMarker
+              key={r.id}
+              longitude={r.lon}
+              latitude={r.lat}
+              onClick={() => selectOutage(r.id)}
+            >
+              <MarkerContent>
+                <MineMarkerIcon />
+              </MarkerContent>
+            </MapMarker>
+          ))}
+      </MapCnMap>
+
+      <LayerToggles />
       <PresencePill />
     </div>
   );
 }
 
+const emptyFc: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
+
 /**
- * Conservative HTML escaping for the popup content. MapLibre's
- * setHTML takes raw HTML so we need to neutralize user-controlled
- * bits (place names could contain quotes or angle brackets).
+ * Maintains the CEB multi-point polygon source + two layers (fill
+ * + outline) on the map. Uses useMap() from MapCN for imperative
+ * access to the MapLibre instance.
  */
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+function CebPolygonLayer({ polygons }: { polygons: GeoJSON.FeatureCollection }) {
+  const { map, isLoaded } = useMap();
+
+  useEffect(() => {
+    if (!isLoaded || !map) return;
+    if (!map.getSource('ceb-polygons')) {
+      map.addSource('ceb-polygons', { type: 'geojson', data: emptyFc });
+      map.addLayer({
+        id: 'ceb-polygons-fill',
+        type: 'fill',
+        source: 'ceb-polygons',
+        paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.22 },
+      });
+      map.addLayer({
+        id: 'ceb-polygons-line',
+        type: 'line',
+        source: 'ceb-polygons',
+        paint: { 'line-color': ['get', 'color'], 'line-width': 2 },
+      });
+      const onClick = (e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+        const id = e.features?.[0]?.properties?.id as string | undefined;
+        if (id) useAppStore.getState().selectOutage(id);
+      };
+      map.on('click', 'ceb-polygons-fill', onClick);
+      map.on('mouseenter', 'ceb-polygons-fill', () => {
+        map.getCanvas().style.cursor = 'pointer';
+      });
+      map.on('mouseleave', 'ceb-polygons-fill', () => {
+        map.getCanvas().style.cursor = '';
+      });
+    }
+    const source = map.getSource('ceb-polygons') as GeoJSONSource | undefined;
+    source?.setData(polygons);
+  }, [map, isLoaded, polygons]);
+
+  return null;
+}
+
+/**
+ * Debounced pan → refetch trigger. Fires onMove with the new center
+ * 500ms after the user stops panning, so we can refetch outages for
+ * the new region without hammering the worker during the drag.
+ */
+function ViewportTracker({ onMove }: { onMove: (c: { lat: number; lon: number }) => void }) {
+  const { map, isLoaded } = useMap();
+  useEffect(() => {
+    if (!isLoaded || !map) return;
+    let t: number | undefined;
+    const handler = () => {
+      if (t != null) window.clearTimeout(t);
+      t = window.setTimeout(() => {
+        const c = map.getCenter();
+        onMove({ lat: c.lat, lon: c.lng });
+      }, 500);
+    };
+    map.on('moveend', handler);
+    return () => {
+      if (t != null) window.clearTimeout(t);
+      map.off('moveend', handler);
+    };
+  }, [map, isLoaded, onMove]);
+  return null;
+}
+
+/**
+ * Smoothly fly to a new location whenever the user changes their
+ * header city pick or GPS position.
+ */
+function AutoFlyTo({ lat, lon }: { lat: number; lon: number }) {
+  const { map, isLoaded } = useMap();
+  useEffect(() => {
+    if (!isLoaded || !map) return;
+    map.flyTo({ center: [lon, lat], zoom: 12, duration: 1500 });
+  }, [map, isLoaded, lat, lon]);
+  return null;
+}
+
+/**
+ * Forces a repaint + resize after the detail sheet closes so any
+ * layout reflow from Radix's body scroll-lock flip gets flushed
+ * through to MapLibre's marker transforms.
+ */
+function RepaintOnCloseSheet({ selectedId }: { selectedId: string | null }) {
+  const { map, isLoaded } = useMap();
+  useEffect(() => {
+    if (!isLoaded || !map) return;
+    if (selectedId === null) {
+      const t = window.setTimeout(() => {
+        map.resize();
+        map.triggerRepaint();
+      }, 60);
+      return () => window.clearTimeout(t);
+    }
+  }, [map, isLoaded, selectedId]);
+  return null;
+}
+
+function HomePopupContent({
+  source,
+  name,
+  lat,
+  lon,
+}: {
+  source: 'gps' | 'manual';
+  name: string | null;
+  lat: number;
+  lon: number;
+}) {
+  const { t } = useTranslation();
+  const label = source === 'manual' ? t('map.home_manual') : t('map.home_gps');
+  return (
+    <div className="border-border bg-background text-foreground min-w-[180px] border px-3 py-2 text-xs shadow-lg">
+      <p className="text-muted-foreground text-[9px] font-bold uppercase tracking-wide">
+        {label}
+      </p>
+      <p className="mt-0.5 text-[12px] font-bold">{name ?? '—'}</p>
+      <p className="text-muted-foreground mt-0.5 font-mono text-[10px]">
+        {lat.toFixed(5)}, {lon.toFixed(5)}
+      </p>
+    </div>
+  );
 }
