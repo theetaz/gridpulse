@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import type { OutagesResponse } from '@/types/api';
 
@@ -31,5 +31,10 @@ export function useOutages(opts: UseOutagesOptions = {}) {
     enabled: enabled && hasLocation,
     refetchInterval: refetchMs,
     staleTime: 30_000,
+    // Keep returning the previous payload while the next one is in
+    // flight. Prevents the map from tearing down all markers every
+    // time the query refetches (on pan, on realtime events, on focus)
+    // and flash-rebuilding them once new data lands.
+    placeholderData: keepPreviousData,
   });
 }

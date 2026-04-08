@@ -1,18 +1,21 @@
 import type { Env } from '../types/env';
 
-type Session = { userId?: string };
-
 /**
- * One Durable Object per CEB area. Acts as a WebSocket hub for
- * real-time outage updates within that area.
+ * One Durable Object per CEB area (we currently use a single "global"
+ * instance for v1). Acts as a WebSocket hub for real-time outage
+ * updates and tracks a live presence count.
  *
- * Routes:
- *   GET  /ws         → upgrade to WebSocket
- *   POST /broadcast  → server-to-server fan-out (called by cron poller)
+ * IMPORTANT — hibernation API: we use `state.acceptWebSocket` +
+ * `state.getWebSockets()` instead of an in-memory session map. An
+ * in-memory Map is lost whenever the DO hibernates (which it will
+ * aggressively between messages), so tracking sessions there led to
+ * the presence count being stuck at 1 regardless of how many clients
+ * were actually connected.
+ *
+ * `state.getWebSockets()` is the canonical source of truth for how
+ * many sockets are currently open and survives hibernation correctly.
  */
 export class AreaRoom implements DurableObject {
-  private sessions = new Map<WebSocket, Session>();
-
   constructor(
     private state: DurableObjectState,
     _env: Env,
@@ -20,13 +23,11 @@ export class AreaRoom implements DurableObject {
 
   async fetch(request: Request): Promise<Response> {
     // WebSocket upgrade — detect via the Upgrade header instead of
-    // the path so the DO works regardless of which route the Worker
-    // forwarded from.
+    // path so the DO works regardless of which route forwarded.
     if (request.headers.get('upgrade') === 'websocket') {
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair);
       this.state.acceptWebSocket(server);
-      this.sessions.set(server, {});
       // Tell everyone (including the newcomer) the updated count
       this.broadcastPresence();
       return new Response(null, { status: 101, webSocket: client });
@@ -41,32 +42,27 @@ export class AreaRoom implements DurableObject {
     }
 
     if (url.pathname === '/stats') {
-      return new Response(JSON.stringify({ onlineCount: this.sessions.size }), {
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return new Response(
+        JSON.stringify({ onlineCount: this.state.getWebSockets().length }),
+        { headers: { 'Content-Type': 'application/json' } },
+      );
     }
 
     return new Response('not found', { status: 404 });
   }
 
-  private broadcastPresence() {
-    const msg = JSON.stringify({ type: 'presence', count: this.sessions.size });
-    this.broadcast(msg);
-  }
-
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
     if (typeof message !== 'string') return;
-    const data = JSON.parse(message) as { type: string; payload?: unknown; userId?: string };
+    let data: { type?: string; payload?: unknown };
+    try {
+      data = JSON.parse(message);
+    } catch {
+      return;
+    }
 
     switch (data.type) {
-      case 'identify':
-        this.sessions.set(ws, { userId: data.userId });
-        ws.send(
-          JSON.stringify({
-            type: 'state',
-            payload: (await this.state.storage.get('currentOutages')) ?? [],
-          }),
-        );
+      case 'ping':
+        ws.send(JSON.stringify({ type: 'pong' }));
         break;
 
       case 'report':
@@ -79,24 +75,29 @@ export class AreaRoom implements DurableObject {
     }
   }
 
-  async webSocketClose(ws: WebSocket) {
-    this.sessions.delete(ws);
+  async webSocketClose(_ws: WebSocket, _code: number, _reason: string, _wasClean: boolean) {
+    // Cloudflare already removed the socket from getWebSockets() by
+    // the time this fires, so broadcasting reads the correct new count.
     this.broadcastPresence();
   }
 
-  async webSocketError(ws: WebSocket) {
-    this.sessions.delete(ws);
+  async webSocketError(_ws: WebSocket, _error: unknown) {
     this.broadcastPresence();
+  }
+
+  private broadcastPresence() {
+    const count = this.state.getWebSockets().length;
+    this.broadcast(JSON.stringify({ type: 'presence', count }));
   }
 
   private broadcast(message: string, exclude?: WebSocket) {
-    for (const [ws] of this.sessions) {
-      if (ws !== exclude && ws.readyState === WebSocket.READY_STATE_OPEN) {
-        try {
-          ws.send(message);
-        } catch {
-          this.sessions.delete(ws);
-        }
+    for (const ws of this.state.getWebSockets()) {
+      if (ws === exclude) continue;
+      if (ws.readyState !== WebSocket.READY_STATE_OPEN) continue;
+      try {
+        ws.send(message);
+      } catch {
+        // Stale socket — will get GC'd on next accept/close cycle
       }
     }
   }

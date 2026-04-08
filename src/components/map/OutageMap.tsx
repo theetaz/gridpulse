@@ -8,6 +8,7 @@ import {
   MarkerContent,
   MarkerPopup,
   MapControls as MapCnControls,
+  MapClusterLayer,
   useMap,
 } from '@/components/ui/map';
 import { useOutages } from '@/hooks/useOutages';
@@ -17,12 +18,7 @@ import { getDeviceId } from '@/lib/profile';
 import { buildOutageGeoJSON } from '@/lib/geo-helpers';
 import { LayerToggles } from './LayerToggles';
 import { PresencePill } from './PresencePill';
-import {
-  CebMarkerIcon,
-  CrowdMarkerIcon,
-  MineMarkerIcon,
-  HomeMarkerIcon,
-} from './markers';
+import { CrowdMarkerIcon, MineMarkerIcon, HomeMarkerIcon } from './markers';
 
 const SRI_LANKA_CENTER: [number, number] = [80.7, 7.8];
 const REFETCH_DISTANCE_KM = 5;
@@ -74,12 +70,28 @@ export function OutageMap() {
 
   // Split crowd reports up front so we can render them in separate
   // filtered groups (mine vs others).
-  const { cebSinglePoints, othersCrowd, myCrowd } = useMemo(() => {
+  const { cebSinglePointsGeoJSON, othersCrowd, myCrowd } = useMemo(() => {
     const ceb = (data?.ceb ?? []).filter((o) => o.polygon && o.polygon.length === 1);
     const crowd = data?.crowdsourced ?? [];
     const mine = crowd.filter((r) => r.userId === deviceId);
     const others = crowd.filter((r) => r.userId !== deviceId);
-    return { cebSinglePoints: ceb, othersCrowd: others, myCrowd: mine };
+
+    // GeoJSON FeatureCollection of CEB single-point outages for the
+    // cluster layer. The properties carry just the id so the click
+    // handler can open the detail sheet.
+    const cebGeo: GeoJSON.FeatureCollection<GeoJSON.Point> = {
+      type: 'FeatureCollection',
+      features: ceb.map((o) => ({
+        type: 'Feature',
+        properties: { id: o.id },
+        geometry: {
+          type: 'Point' as const,
+          coordinates: [o.polygon[0].lon, o.polygon[0].lat],
+        },
+      })),
+    };
+
+    return { cebSinglePointsGeoJSON: cebGeo, othersCrowd: others, myCrowd: mine };
   }, [data, deviceId]);
 
   return (
@@ -132,20 +144,24 @@ export function OutageMap() {
           </MapMarker>
         )}
 
-        {/* CEB single-point outages */}
-        {showCeb &&
-          cebSinglePoints.map((o) => (
-            <MapMarker
-              key={o.id}
-              longitude={o.polygon[0].lon}
-              latitude={o.polygon[0].lat}
-              onClick={() => selectOutage(o.id)}
-            >
-              <MarkerContent>
-                <CebMarkerIcon />
-              </MarkerContent>
-            </MapMarker>
-          ))}
+        {/* CEB single-point outages — clustered when zoomed out so
+            dense areas don't become a wall of overlapping pins.
+            Zooming in or tapping a cluster expands to individual
+            points. */}
+        {showCeb && (
+          <MapClusterLayer
+            data={cebSinglePointsGeoJSON}
+            clusterMaxZoom={13}
+            clusterRadius={45}
+            clusterColors={['#fecaca', '#ef4444', '#991b1b']}
+            clusterThresholds={[5, 20]}
+            pointColor="#ef4444"
+            onPointClick={(feature) => {
+              const id = feature.properties?.id as string | undefined;
+              if (id) selectOutage(id);
+            }}
+          />
+        )}
 
         {/* Crowd reports from other users */}
         {showCrowd &&
@@ -301,8 +317,11 @@ function HomePopupContent({
 }) {
   const { t } = useTranslation();
   const label = source === 'manual' ? t('map.home_manual') : t('map.home_gps');
+  // MarkerPopup already wraps us in `bg-popover text-popover-foreground
+  // border p-3 shadow-md`, so this component renders BARE content —
+  // no outer border, no background, no padding.
   return (
-    <div className="border-border bg-background text-foreground min-w-[180px] border px-3 py-2 text-xs shadow-lg">
+    <div className="min-w-[170px]">
       <p className="text-muted-foreground text-[9px] font-bold uppercase tracking-wide">
         {label}
       </p>
