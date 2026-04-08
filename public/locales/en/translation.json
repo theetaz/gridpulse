@@ -1,0 +1,131 @@
+{
+  "app": {
+    "name": "GridPulse",
+    "tagline": "Power outage tracker for Sri Lanka"
+  },
+  "nav": {
+    "home": "Home",
+    "map": "Map",
+    "report": "Report",
+    "feed": "Feed",
+    "stats": "Stats"
+  },
+  "home": {
+    "powered_title": "Power's on",
+    "powered_subtitle": "No outages reported near you",
+    "outage_title": "Power's out near you",
+    "outage_subtitle": "{{distance}} away from where you are",
+    "started": "Started {{time}}",
+    "affected_one": "{{count}} home affected",
+    "affected_other": "{{count}} homes affected",
+    "est_back": "Usually back in about {{duration}}",
+    "no_estimate": "Restoration time unknown",
+    "report_button": "Power's out at my place too",
+    "near_you": "Other power cuts near you",
+    "no_other": "Nothing else nearby",
+    "see_more": "See all on map",
+    "locating": "Finding your location…",
+    "location_error": "Couldn't get your location",
+    "location_retry": "Try again",
+    "place_label": "You are in",
+    "place_label_manual": "Viewing"
+  },
+  "report": {
+    "title": "Report a power cut",
+    "subtitle": "Help neighbors know what's happening",
+    "use_my_location": "Use my current location",
+    "description_label": "Anything else? (optional)",
+    "description_placeholder": "e.g. lights went off about 10 minutes ago",
+    "submit": "Submit report",
+    "submitting": "Submitting…",
+    "success_title": "Thanks!",
+    "success_body": "Your report is live. Neighbors nearby can see it now.",
+    "fused_title": "Linked to existing outage",
+    "fused_body": "We matched your report with a CEB outage already in your area.",
+    "error_location": "Couldn't get your location",
+    "error_submit": "Couldn't submit your report. Try again."
+  },
+  "outage": {
+    "breakdown": "Unplanned breakdown",
+    "demand_management": "Scheduled load shedding",
+    "planned": "Planned maintenance",
+    "user_reported": "Neighbor reported",
+    "started_ago": "Started {{time}}",
+    "homes_affected_one": "{{count}} home",
+    "homes_affected_other": "{{count}} homes",
+    "people_affected_one": "About {{count}} person nearby",
+    "people_affected_other": "About {{count}} people nearby",
+    "neighbors_confirmed_one": "{{count}} neighbor confirmed",
+    "neighbors_confirmed_other": "{{count}} neighbors confirmed",
+    "confirm_button": "Yes, my power's out too",
+    "confirm_done": "Thanks for confirming",
+    "resolve_button": "Power's back!",
+    "resolve_done": "Marked as restored",
+    "ceb_official": "CEB confirmed",
+    "crowdsourced": "Reported by neighbors",
+    "see_on_map": "See on map",
+    "no_description": "No details added"
+  },
+  "feed": {
+    "title": "Recent power cuts",
+    "subtitle": "What's happening near you",
+    "empty_title": "No power cuts nearby",
+    "empty_subtitle": "Looks like everything's running. We'll let you know if that changes.",
+    "loading": "Loading…"
+  },
+  "stats": {
+    "title": "Power cut stats",
+    "island_title": "Across Sri Lanka",
+    "active_now": "Active power cuts",
+    "people_affected": "People affected",
+    "today_label": "New today",
+    "trend_up": "More than yesterday",
+    "trend_down": "Fewer than yesterday",
+    "trend_flat": "Same as yesterday",
+    "worst_areas_title": "Worst hit areas right now",
+    "your_area_title": "Your area",
+    "outages_7d": "Power cuts last 7 days",
+    "outages_30d": "Power cuts last 30 days",
+    "avg_duration": "Avg time to restore",
+    "peak_hours": "When power cuts usually happen",
+    "no_data": "Not enough history yet",
+    "select_area": "Pick an area"
+  },
+  "common": {
+    "loading": "Loading…",
+    "error": "Something went wrong",
+    "retry": "Try again",
+    "close": "Close",
+    "language": "Language",
+    "theme": "Theme",
+    "minutes_short": "min",
+    "hours_short": "h",
+    "kilometers": "km",
+    "meters": "m",
+    "ago": "ago",
+    "now": "just now"
+  },
+  "search": {
+    "auto": "Auto location",
+    "title": "Pick a location",
+    "subtitle": "Search for a city or use your current location",
+    "placeholder": "Search cities in Sri Lanka",
+    "no_results": "No matches",
+    "use_gps": "Use my current location",
+    "use_gps_subtitle": "Switch back to automatic location",
+    "using_manual": "Using selected location"
+  },
+  "profile": {
+    "title": "Your profile",
+    "subtitle": "This is how you appear to other users",
+    "your_name": "Your name",
+    "reroll": "Generate a new random name",
+    "save": "Save",
+    "device_id": "Device ID",
+    "device_note": "Stored only on this device. Used to dedupe your confirmations — no personal info is collected."
+  },
+  "map": {
+    "ceb_layer": "CEB data",
+    "crowd_layer": "Reports"
+  }
+}

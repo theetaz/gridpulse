@@ -1,0 +1,71 @@
+name = "gridpulse-api"
+main = "src/index.ts"
+compatibility_date = "2026-04-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Cron is intentionally disabled. We poll CEB on-demand from user
+# requests (see services/ceb.service.ts → pollArea) and cache the result
+# in D1 with a 10-minute TTL. This:
+#   - keeps CEB endpoint load proportional to actual user interest
+#   - avoids IP blocks from proactive island-wide scans
+#   - means areas with no users get zero traffic
+#
+# To re-enable periodic polling, uncomment the block below and redeploy.
+#
+# [triggers]
+# crons = ["*/30 * * * *"]
+
+# Durable Objects — AreaRoom WebSocket hub per CEB area
+[durable_objects]
+bindings = [
+  { name = "AREA_ROOM", class_name = "AreaRoom" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["AreaRoom"]
+
+# Vars (non-secret)
+[vars]
+GEOPOP_URL = "http://localhost:8990"
+CEB_BASE_URL = "https://cebcare.ceb.lk"
+
+# ──────────────────────────────────────────────────────────────
+# TODO: Uncomment + fill IDs after creating these resources.
+# Run from `worker/`:
+#
+#   wrangler d1 create gridpulse
+#   wrangler kv namespace create CACHE
+#   wrangler r2 bucket create gridpulse-photos
+#   wrangler queues create push-notifications
+#
+# Then paste the returned IDs below.
+# ──────────────────────────────────────────────────────────────
+
+[[d1_databases]]
+binding = "DB"
+database_name = "gridpulse"
+database_id = "00000000-0000-0000-0000-000000000000"  # placeholder — replace with real ID after `wrangler d1 create gridpulse`. Local mode works regardless.
+
+# [[kv_namespaces]]
+# binding = "CACHE"
+# id = "<your-kv-id>"
+
+# [[r2_buckets]]
+# binding = "PHOTOS"
+# bucket_name = "gridpulse-photos"
+
+# [[queues.producers]]
+# binding = "NOTIFICATIONS"
+# queue = "push-notifications"
+
+# [[queues.consumers]]
+# queue = "push-notifications"
+# max_batch_size = 100
+# max_batch_timeout = 30
+
+# Secrets (set via `wrangler secret put <NAME>`):
+#   VAPID_PUBLIC_KEY
+#   VAPID_PRIVATE_KEY
+#   CEB_USERNAME       (optional, for authenticated CEB endpoints)
+#   CEB_PASSWORD       (optional)

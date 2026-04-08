@@ -12,6 +12,44 @@ dist
 dist-ssr
 *.local
 
+# Env / secrets — never commit
+.env
+.env.*
+!.env.example
+.dev.vars
+
+# Cloudflare Workers local state
+.wrangler
+worker/.wrangler
+worker/.dev.vars
+
+# Misc
+.turbo
+*.tsbuildinfo
+
+# AI coding assistants — never commit agent context, rules, or scratch files
+CLAUDE.md
+AGENT.md
+AGENTS.md
+SKILL.md
+SKILLS.md
+.claude/
+.claude.json
+.cursor/
+.cursorrules
+.cursorignore
+.windsurf/
+.windsurfrules
+.aider*
+.continue/
+.codeium/
+.zed/
+.github/copilot-instructions.md
+.github/chatmodes/
+.roo/
+.roomodes
+.aiderignore
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
