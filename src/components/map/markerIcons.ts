@@ -4,10 +4,25 @@
  * avoids the overhead of mounting a React root per pin — with up to
  * a few hundred points on screen, the difference matters.
  *
+ * IMPORTANT: the returned element is what MapLibre writes its
+ * `transform: translate(x, y)` onto for positioning. We must not
+ * overwrite its transform with our own hover/scale effects — doing
+ * that was the cause of a bug where tapping a marker caused it to
+ * jump to the map origin on mobile (mouseenter fired and clobbered
+ * MapLibre's translate; mouseleave never fired on touch, leaving the
+ * marker stuck off-center).
+ *
+ * Layout:
+ *   outer        — handed to MapLibre. Plain wrapper, no transform.
+ *     inner      — the visible circle. Hover scales THIS element.
+ *       halo     — absolute-positioned pulsing ring (mine/home only).
+ *       svg      — the icon.
+ *
  * Variants:
  *   - ceb:   red round pin with a lightning bolt (CEB-confirmed)
  *   - crowd: blue round pin with a "users" glyph (neighbor reported)
- *   - mine:  purple pin with a pulsing ring (your own report)
+ *   - mine:  purple pin with a pulsing halo (your own report)
+ *   - home:  sky-blue pin with a home icon (your selected location)
  */
 
 export type MarkerKind = 'ceb' | 'crowd' | 'mine' | 'home';
@@ -69,26 +84,41 @@ const STYLES: Record<MarkerKind, Style> = {
 };
 
 /**
- * Build a DOM element for a single marker. The returned element is
- * handed directly to `new maplibregl.Marker({ element })`.
+ * Build a DOM element for a single marker. Returns the OUTER wrapper
+ * (the one you hand to `new maplibregl.Marker({ element })`); the
+ * outer is transform-free, and the inner child carries the visual
+ * + hover scale.
  */
 export function buildMarkerElement(kind: MarkerKind): HTMLDivElement {
   const style = STYLES[kind];
-  const wrap = document.createElement('div');
-  wrap.className = 'gp-marker';
-  wrap.style.cssText = `
+
+  // Outer wrapper — MapLibre positions this via `transform: translate(...)`.
+  // We must NEVER set a transform on it ourselves.
+  const outer = document.createElement('div');
+  outer.className = `gp-marker gp-marker-${kind}`;
+  outer.style.cssText = `
     width: ${style.size}px;
     height: ${style.size}px;
+    cursor: pointer;
+    position: relative;
+  `;
+
+  // Inner — the visible circle. Hover scales this one.
+  const inner = document.createElement('div');
+  inner.className = 'gp-marker-inner';
+  inner.style.cssText = `
+    position: absolute;
+    inset: 0;
     border-radius: 9999px;
     background: ${style.bg};
     box-shadow: 0 0 0 3px ${style.ring}, 0 2px 6px rgba(0,0,0,0.35);
     display: flex;
     align-items: center;
     justify-content: center;
-    cursor: pointer;
-    transform: translateZ(0);
-    transition: transform 120ms ease, box-shadow 120ms ease;
     border: 2px solid rgba(255,255,255,0.9);
+    transform: scale(1);
+    transition: transform 120ms ease;
+    will-change: transform;
   `;
 
   if (style.glow) {
@@ -101,32 +131,53 @@ export function buildMarkerElement(kind: MarkerKind): HTMLDivElement {
       animation: gpMarkerPulse 1.6s ease-out infinite;
       pointer-events: none;
     `;
-    wrap.appendChild(halo);
-    wrap.style.position = 'relative';
+    inner.appendChild(halo);
   }
 
   const iconSize = style.size * 0.55;
-  wrap.innerHTML += `
-    <svg xmlns="http://www.w3.org/2000/svg" width="${iconSize}" height="${iconSize}"
-         viewBox="0 0 24 24" fill="none" stroke="${style.iconColor}"
-         stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"
-         style="position: relative; z-index: 1;">
-      <path d="${style.path}" />
-    </svg>`;
+  const svgNs = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNs, 'svg');
+  svg.setAttribute('width', String(iconSize));
+  svg.setAttribute('height', String(iconSize));
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', style.iconColor);
+  svg.setAttribute('stroke-width', '2.4');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.style.position = 'relative';
+  svg.style.zIndex = '1';
+  const path = document.createElementNS(svgNs, 'path');
+  path.setAttribute('d', style.path);
+  svg.appendChild(path);
+  inner.appendChild(svg);
 
-  wrap.addEventListener('mouseenter', () => {
-    wrap.style.transform = 'scale(1.12)';
+  outer.appendChild(inner);
+
+  // Hover scales the INNER element only — never the outer, which
+  // MapLibre owns.
+  outer.addEventListener('mouseenter', () => {
+    inner.style.transform = 'scale(1.12)';
   });
-  wrap.addEventListener('mouseleave', () => {
-    wrap.style.transform = 'scale(1)';
+  outer.addEventListener('mouseleave', () => {
+    inner.style.transform = 'scale(1)';
+  });
+  // Reset on pointer cancel / touch end in case mouseleave never fires
+  // (common on iOS after a tap).
+  outer.addEventListener('touchend', () => {
+    inner.style.transform = 'scale(1)';
+  });
+  outer.addEventListener('touchcancel', () => {
+    inner.style.transform = 'scale(1)';
   });
 
-  return wrap;
+  return outer;
 }
 
 /**
- * One-time stylesheet injection for the pulse animation. Safe to call
- * multiple times — subsequent calls are no-ops.
+ * One-time stylesheet injection for the pulse animation + theme-aware
+ * popup styling. Safe to call multiple times — subsequent calls are
+ * no-ops.
  */
 export function ensureMarkerStyles() {
   if (typeof document === 'undefined') return;
@@ -138,6 +189,35 @@ export function ensureMarkerStyles() {
       0%   { transform: scale(1);   opacity: 0.8; }
       70%  { transform: scale(1.8); opacity: 0;   }
       100% { transform: scale(1.8); opacity: 0;   }
+    }
+
+    /* Theme-aware popup — inherits the app's background/foreground
+       CSS variables so the default white popup becomes black in dark
+       mode. */
+    .maplibregl-popup-content {
+      background: var(--background) !important;
+      color: var(--foreground) !important;
+      border: 1px solid var(--border);
+      border-radius: 0 !important;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35) !important;
+      padding: 8px 12px !important;
+      font-family: inherit !important;
+    }
+    .maplibregl-popup-tip {
+      border-top-color: var(--background) !important;
+      border-bottom-color: var(--background) !important;
+      border-left-color: transparent !important;
+      border-right-color: transparent !important;
+    }
+    .maplibregl-popup-anchor-top .maplibregl-popup-tip,
+    .maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+    .maplibregl-popup-anchor-top-right .maplibregl-popup-tip {
+      border-bottom-color: var(--background) !important;
+    }
+    .maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+    .maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+    .maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
+      border-top-color: var(--background) !important;
     }
   `;
   document.head.appendChild(style);

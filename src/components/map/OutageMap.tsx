@@ -241,7 +241,6 @@ export function OutageMap() {
       homeMarkerRef.current.setLngLat(coords);
     } else {
       const el = buildMarkerElement('home');
-      el.style.position = 'relative';
       const marker = new maplibregl.Marker({ element: el }).setLngLat(coords).addTo(map);
       // Popup with the location name — MapLibre sync-positions it
       // with the marker automatically.
