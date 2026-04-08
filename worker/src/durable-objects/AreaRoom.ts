@@ -75,19 +75,31 @@ export class AreaRoom implements DurableObject {
     }
   }
 
-  async webSocketClose(_ws: WebSocket, _code: number, _reason: string, _wasClean: boolean) {
-    // Cloudflare already removed the socket from getWebSockets() by
-    // the time this fires, so broadcasting reads the correct new count.
-    this.broadcastPresence();
+  async webSocketClose(ws: WebSocket, _code: number, _reason: string, _wasClean: boolean) {
+    // During webSocketClose, `state.getWebSockets()` still includes
+    // the closing socket — we have to explicitly exclude it or the
+    // broadcast ships with the stale pre-close count.
+    this.broadcastPresence(ws);
   }
 
-  async webSocketError(_ws: WebSocket, _error: unknown) {
-    this.broadcastPresence();
+  async webSocketError(ws: WebSocket, _error: unknown) {
+    this.broadcastPresence(ws);
   }
 
-  private broadcastPresence() {
-    const count = this.state.getWebSockets().length;
-    this.broadcast(JSON.stringify({ type: 'presence', count }));
+  private broadcastPresence(exclude?: WebSocket) {
+    const live = this.state
+      .getWebSockets()
+      .filter(
+        (s) => s !== exclude && s.readyState === WebSocket.READY_STATE_OPEN,
+      );
+    const message = JSON.stringify({ type: 'presence', count: live.length });
+    for (const s of live) {
+      try {
+        s.send(message);
+      } catch {
+        // Stale socket — will get GC'd next cycle.
+      }
+    }
   }
 
   private broadcast(message: string, exclude?: WebSocket) {

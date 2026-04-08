@@ -94,13 +94,36 @@ export function useRealtime() {
 
     connect();
 
+    // Cleanly close the socket when the tab is hidden / unloaded so
+    // the Durable Object sees the `webSocketClose` event immediately
+    // and other clients get a fresh presence count without waiting
+    // for a TCP timeout (which can take minutes on mobile).
+    //
+    // `pagehide` is the most reliable signal across desktop + iOS
+    // Safari — it fires on tab close, navigation away, and the
+    // bfcache transition. `beforeunload` is a belt-and-braces
+    // fallback for browsers that don't fire pagehide reliably.
+    const handleGoAway = () => {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        try {
+          wsRef.current.close(1001, 'page hidden');
+        } catch {
+          // ignore
+        }
+      }
+    };
+    window.addEventListener('pagehide', handleGoAway);
+    window.addEventListener('beforeunload', handleGoAway);
+
     return () => {
       closedIntentionallyRef.current = true;
+      window.removeEventListener('pagehide', handleGoAway);
+      window.removeEventListener('beforeunload', handleGoAway);
       if (reconnectTimerRef.current != null) {
         window.clearTimeout(reconnectTimerRef.current);
       }
       wsRef.current?.close();
       wsRef.current = null;
     };
-  }, [qc]);
+  }, [qc, setOnlineCount]);
 }
