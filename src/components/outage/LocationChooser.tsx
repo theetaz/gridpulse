@@ -1,13 +1,13 @@
 import { useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Locate, Search, MapPin, Loader2, X, Home } from 'lucide-react';
+import { Locate, Search, MapPin, Loader2, X, Home, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useGeocodeSearch } from '@/hooks/useGeocodeSearch';
 import { useGeolocation } from '@/hooks/useGeolocation';
 import { useHomeLocation } from '@/hooks/useHomeLocation';
 import { formatNumber } from '@/lib/format';
-import { MapLocationPicker, type PickedPoint } from './MapLocationPicker';
+import { MapPickerDialog } from './MapPickerDialog';
 
 export interface ChosenLocation {
   lat: number;
@@ -38,6 +38,7 @@ export function LocationChooser({ value, onChange, hideHome }: Props) {
   const { t } = useTranslation();
   const [mode, setMode] = useState<Mode>('quick');
   const [query, setQuery] = useState('');
+  const [mapOpen, setMapOpen] = useState(false);
 
   const { home } = useHomeLocation();
   const { position, loading: gpsLoading, error: gpsError, refresh } = useGeolocation(false);
@@ -212,33 +213,66 @@ export function LocationChooser({ value, onChange, hideHome }: Props) {
         </div>
       )}
 
+      {/*
+       * Map mode doesn't render the map inline — it opens a full-screen
+       * MapPickerDialog so MapLibre's pan gesture doesn't fight Vaul's
+       * swipe-to-dismiss on the parent Drawer.
+       */}
       {mode === 'map' && (
-        <MapLocationPicker
-          initial={mapInitial}
-          onChange={(p: PickedPoint) =>
-            onChange({
-              lat: p.lat,
-              lon: p.lon,
-              source: 'map',
-              name: p.name,
-              displayName: p.displayName,
-            })
-          }
-        />
+        <Button
+          type="button"
+          variant="outline"
+          className="h-auto w-full justify-start gap-3 py-3"
+          onClick={() => setMapOpen(true)}
+        >
+          <MapPin className="h-4 w-4 shrink-0" />
+          <div className="flex-1 text-left">
+            <p className="text-xs font-bold uppercase tracking-wide">
+              {value?.source === 'map' ? t('report.pick_again_on_map') : t('report.pick_on_map')}
+            </p>
+            <p className="text-muted-foreground text-[11px]">
+              {t('report.pick_on_map_hint')}
+            </p>
+          </div>
+          <Pencil className="text-muted-foreground h-3.5 w-3.5" />
+        </Button>
       )}
 
-      {/* Summary of current selection */}
-      {value && mode !== 'map' && (
-        <div className="border-border bg-muted/30 border p-2.5">
-          <p className="text-muted-foreground text-[10px] uppercase tracking-wide">
-            {t('report.selected_location')}
-          </p>
-          <p className="mt-0.5 truncate text-sm font-medium">
-            {value.name ?? value.displayName ?? `${value.lat.toFixed(5)}, ${value.lon.toFixed(5)}`}
-          </p>
-          <p className="text-muted-foreground mt-0.5 font-mono text-[11px]">
-            {value.lat.toFixed(5)}, {value.lon.toFixed(5)} · {t(`report.src_${value.source}`)}
-          </p>
+      <MapPickerDialog
+        open={mapOpen}
+        onOpenChange={setMapOpen}
+        initial={mapInitial}
+        onConfirm={(p) =>
+          onChange({
+            lat: p.lat,
+            lon: p.lon,
+            source: 'map',
+            name: p.name,
+            displayName: p.displayName,
+          })
+        }
+      />
+
+      {/* Summary of current selection — always visible when a value is set */}
+      {value && (
+        <div className="border-border bg-muted/30 flex items-center gap-3 border p-2.5">
+          <div className="bg-primary/10 text-primary flex h-8 w-8 shrink-0 items-center justify-center">
+            {value.source === 'gps' && <Locate className="h-4 w-4" />}
+            {value.source === 'home' && <Home className="h-4 w-4" />}
+            {value.source === 'search' && <Search className="h-4 w-4" />}
+            {value.source === 'map' && <MapPin className="h-4 w-4" />}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-muted-foreground text-[10px] uppercase tracking-wide">
+              {t('report.selected_location')} · {t(`report.src_${value.source}`)}
+            </p>
+            <p className="truncate text-sm font-medium">
+              {value.name ?? value.displayName ?? t('report.pin_only')}
+            </p>
+            <p className="text-muted-foreground font-mono text-[10px]">
+              {value.lat.toFixed(5)}, {value.lon.toFixed(5)}
+            </p>
+          </div>
         </div>
       )}
     </div>

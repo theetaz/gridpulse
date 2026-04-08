@@ -9,7 +9,6 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
 import { MapPin, Search, Locate, X } from 'lucide-react';
 import { useGeocodeSearch } from '@/hooks/useGeocodeSearch';
 import { useAppStore } from '@/stores/appStore';
@@ -29,10 +28,18 @@ export function LocationSearch() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="sm" className="h-7 gap-1.5 px-2 text-xs">
-          <MapPin className="h-3.5 w-3.5" />
-          <span className="max-w-24 truncate">{manual ? manual.name : t('search.auto')}</span>
-        </Button>
+        <button
+          type="button"
+          className="border-border bg-muted/30 hover:bg-accent flex h-9 w-full items-center gap-2 border px-3 text-left text-xs transition"
+        >
+          <MapPin className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
+          <span className="min-w-0 flex-1 truncate font-medium">
+            {manual ? manual.name : t('search.auto')}
+          </span>
+          <span className="text-muted-foreground shrink-0 text-[10px]">
+            {t('search.change')}
+          </span>
+        </button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>

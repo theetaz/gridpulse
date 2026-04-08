@@ -9,11 +9,37 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { User, Shuffle, Home, X } from 'lucide-react';
+import { Shuffle, Home, X } from 'lucide-react';
 import { useDisplayName } from '@/hooks/useDisplayName';
 import { useHomeLocation } from '@/hooks/useHomeLocation';
 import { getDeviceId } from '@/lib/profile';
 import { LocationChooser, type ChosenLocation } from '@/components/outage/LocationChooser';
+
+/**
+ * Pick a consistent color for the avatar background based on the device
+ * id. Keeps the same colour across reloads (until the user rerolls their
+ * name, in which case that stays the same since it's keyed on device id).
+ */
+function avatarColor(seed: string): string {
+  const palette = [
+    'bg-red-500',
+    'bg-orange-500',
+    'bg-amber-500',
+    'bg-lime-500',
+    'bg-emerald-500',
+    'bg-teal-500',
+    'bg-cyan-500',
+    'bg-sky-500',
+    'bg-blue-500',
+    'bg-indigo-500',
+    'bg-violet-500',
+    'bg-fuchsia-500',
+    'bg-pink-500',
+  ];
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) | 0;
+  return palette[Math.abs(hash) % palette.length];
+}
 
 type View = 'profile' | 'home';
 
@@ -44,18 +70,19 @@ export function ProfileMenu() {
     }
   }, [open, name, home]);
 
+  const initial = (name.match(/\b(\w)/g)?.slice(0, 2).join('') ?? 'U').toUpperCase();
+  const bg = avatarColor(getDeviceId());
+
   return (
     <>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-7 gap-1.5 px-2 text-xs"
+      <button
+        type="button"
+        className={`flex h-9 w-9 shrink-0 items-center justify-center text-xs font-bold text-white ${bg}`}
         onClick={() => setOpen(true)}
-        aria-label={t('profile.title')}
+        aria-label={`${t('profile.title')}: ${name}`}
       >
-        <User className="h-3.5 w-3.5" />
-        <span className="max-w-24 truncate">{name}</span>
-      </Button>
+        {initial}
+      </button>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-md">
