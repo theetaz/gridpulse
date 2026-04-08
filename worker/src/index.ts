@@ -12,10 +12,20 @@ export { AreaRoom } from './durable-objects/AreaRoom';
 
 const app = new Hono<{ Bindings: Env }>();
 
+// CORS allowlist: localhost dev, the canonical Pages domain, any
+// *.pages.dev preview (per-deployment branches), and a reserved
+// custom domain. Using a function lets us accept previews like
+// https://4ea80583.gridpulse-cyr.pages.dev without listing every one.
 app.use(
   '*',
   cors({
-    origin: ['https://gridpulse.lk', 'http://localhost:5173'],
+    origin: (origin) => {
+      if (!origin) return origin;
+      if (origin === 'http://localhost:5173' || origin === 'http://localhost:5174') return origin;
+      if (origin === 'https://gridpulse.lk') return origin;
+      if (/^https:\/\/([a-z0-9-]+\.)?gridpulse-cyr\.pages\.dev$/.test(origin)) return origin;
+      return null;
+    },
   }),
 );
 

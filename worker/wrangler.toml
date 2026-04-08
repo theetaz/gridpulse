@@ -23,11 +23,11 @@ bindings = [
 
 [[migrations]]
 tag = "v1"
-new_classes = ["AreaRoom"]
+new_sqlite_classes = ["AreaRoom"]
 
 # Vars (non-secret)
 [vars]
-GEOPOP_URL = "http://localhost:8990"
+GEOPOP_URL = "https://cebgeo.nipuntheekshana.com"
 CEB_BASE_URL = "https://cebcare.ceb.lk"
 
 # ──────────────────────────────────────────────────────────────
@@ -45,7 +45,7 @@ CEB_BASE_URL = "https://cebcare.ceb.lk"
 [[d1_databases]]
 binding = "DB"
 database_name = "gridpulse"
-database_id = "00000000-0000-0000-0000-000000000000"  # placeholder — replace with real ID after `wrangler d1 create gridpulse`. Local mode works regardless.
+database_id = "d9c65b4a-378d-457b-9988-aa9297c4769c"
 
 # [[kv_namespaces]]
 # binding = "CACHE"
