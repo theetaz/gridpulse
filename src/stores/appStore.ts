@@ -24,8 +24,10 @@ interface AppState {
   // Map overlay toggles — persisted so user prefs stick across reloads
   showCeb: boolean;
   showCrowd: boolean;
+  showMine: boolean;
   toggleCeb: () => void;
   toggleCrowd: () => void;
+  toggleMine: () => void;
 
   // Manual location override — when set, all location-aware queries
   // use this instead of the browser's GPS position.
@@ -48,8 +50,10 @@ export const useAppStore = create<AppState>()(
 
       showCeb: true,
       showCrowd: true,
+      showMine: true,
       toggleCeb: () => set((s) => ({ showCeb: !s.showCeb })),
       toggleCrowd: () => set((s) => ({ showCrowd: !s.showCrowd })),
+      toggleMine: () => set((s) => ({ showMine: !s.showMine })),
 
       manualLocation: null,
       setManualLocation: (loc) => set({ manualLocation: loc }),
@@ -59,6 +63,7 @@ export const useAppStore = create<AppState>()(
       partialize: (state) => ({
         showCeb: state.showCeb,
         showCrowd: state.showCrowd,
+        showMine: state.showMine,
         manualLocation: state.manualLocation,
       }),
     },

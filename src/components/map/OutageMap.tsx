@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import maplibregl, { type GeoJSONSource } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import { useTranslation } from 'react-i18next';
 import { useOutages } from '@/hooks/useOutages';
 import { useLocation } from '@/hooks/useLocation';
 import { useAppStore } from '@/stores/appStore';
 import { useTheme } from '@/components/theme-provider';
 import { buildOutageGeoJSON } from '@/lib/geo-helpers';
 import { MapControls } from './MapControls';
+import { PresencePill } from './PresencePill';
 import { getDeviceId } from '@/lib/profile';
 import {
   buildMarkerElement,
@@ -36,9 +38,10 @@ const STYLE_DARK = 'https://tiles.openfreemap.org/styles/dark';
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
 export function OutageMap() {
+  const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
-  const userMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const homeMarkerRef = useRef<maplibregl.Marker | null>(null);
 
   // Track custom HTML markers by outage id so we can diff on updates
   // rather than tearing down and rebuilding every frame.
@@ -62,8 +65,10 @@ export function OutageMap() {
 
   const { theme } = useTheme();
   const selectOutage = useAppStore((s) => s.selectOutage);
+  const selectedOutageId = useAppStore((s) => s.selectedOutageId);
   const showCeb = useAppStore((s) => s.showCeb);
   const showCrowd = useAppStore((s) => s.showCrowd);
+  const showMine = useAppStore((s) => s.showMine);
 
   // Initialize map once
   useEffect(() => {
@@ -178,12 +183,19 @@ export function OutageMap() {
         }
       }
 
-      // Crowd reports — mine gets a distinct marker variant
-      if (showCrowd) {
-        for (const r of data.crowdsourced) {
-          const kind: MarkerKind = r.userId === me ? 'mine' : 'crowd';
-          next.set(r.id, { id: r.id, lat: r.lat, lon: r.lon, kind });
-        }
+      // Crowd reports split into "mine" and "others". Each has its own
+      // independent toggle so users can see just their own reports,
+      // just others', or both.
+      for (const r of data.crowdsourced) {
+        const isMine = r.userId === me;
+        if (isMine && !showMine) continue;
+        if (!isMine && !showCrowd) continue;
+        next.set(r.id, {
+          id: r.id,
+          lat: r.lat,
+          lon: r.lon,
+          kind: isMine ? 'mine' : 'crowd',
+        });
       }
 
       // Remove stale markers
@@ -216,27 +228,57 @@ export function OutageMap() {
 
     if (map.isStyleLoaded()) apply();
     else map.once('load', apply);
-  }, [data, selectOutage, showCeb, showCrowd]);
+  }, [data, selectOutage, showCeb, showCrowd, showMine]);
 
-  // User location marker
+  // User location marker — shown as a home icon, clickable to show a
+  // popup with the location name / coordinates.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || location.lat == null || location.lon == null) return;
     const coords: [number, number] = [location.lon, location.lat];
-    if (userMarkerRef.current) {
-      userMarkerRef.current.setLngLat(coords);
+
+    if (homeMarkerRef.current) {
+      homeMarkerRef.current.setLngLat(coords);
     } else {
-      const el = document.createElement('div');
-      el.className = 'h-3 w-3 rounded-full bg-blue-500 ring-4 ring-blue-500/30';
-      userMarkerRef.current = new maplibregl.Marker({ element: el })
-        .setLngLat(coords)
-        .addTo(map);
+      const el = buildMarkerElement('home');
+      el.style.position = 'relative';
+      const marker = new maplibregl.Marker({ element: el }).setLngLat(coords).addTo(map);
+      // Popup with the location name — MapLibre sync-positions it
+      // with the marker automatically.
+      const popup = new maplibregl.Popup({
+        offset: 20,
+        closeButton: false,
+        className: 'gp-home-popup',
+      });
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const label =
+          location.placeName ||
+          location.displayName ||
+          `${coords[1].toFixed(4)}, ${coords[0].toFixed(4)}`;
+        const sourceLabel =
+          location.source === 'manual'
+            ? t('map.home_manual')
+            : t('map.home_gps');
+        popup
+          .setLngLat(coords)
+          .setHTML(
+            `<div style="font-family: inherit; padding: 2px 4px;">
+               <div style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.7;">${sourceLabel}</div>
+               <div style="font-size: 12px; font-weight: 700; margin-top: 2px;">${escapeHtml(label)}</div>
+             </div>`,
+          )
+          .addTo(map);
+      });
+      homeMarkerRef.current = marker;
     }
     map.flyTo({ center: coords, zoom: 12, duration: 1500 });
-  }, [location.lat, location.lon]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.lat, location.lon, location.placeName, location.source]);
 
-  // Toggle CEB/crowd layer visibility — polygons via setLayoutProperty,
-  // markers get hidden/shown via visibility CSS.
+  // Only the CEB *polygons* need visibility via setLayoutProperty.
+  // Individual markers are now added/removed by the data effect based
+  // on the flags, so we don't need to keep hidden markers around.
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -246,19 +288,27 @@ export function OutageMap() {
         map.setLayoutProperty('ceb-polygons-fill', 'visibility', cebVis);
       if (map.getLayer('ceb-polygons-line'))
         map.setLayoutProperty('ceb-polygons-line', 'visibility', cebVis);
-
-      for (const { marker, kind } of markerIndex.current.values()) {
-        const el = marker.getElement();
-        if (kind === 'ceb') {
-          el.style.display = showCeb ? '' : 'none';
-        } else {
-          el.style.display = showCrowd ? '' : 'none';
-        }
-      }
     };
     if (map.isStyleLoaded()) apply();
     else map.once('load', apply);
-  }, [showCeb, showCrowd]);
+  }, [showCeb]);
+
+  // Fix for the "marker ghost" bug: when the Radix Dialog detail sheet
+  // closes, it flips body.style.overflow off, which triggers a layout
+  // recalc that leaves MapLibre's marker transforms in a stale state —
+  // they look invisible until the user pans the map. Forcing a repaint
+  // + resize after the sheet closes restores them.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (selectedOutageId === null) {
+      const t1 = window.setTimeout(() => {
+        map.resize();
+        map.triggerRepaint();
+      }, 60);
+      return () => window.clearTimeout(t1);
+    }
+  }, [selectedOutageId]);
 
   // Theme change → swap basemap style
   useEffect(() => {
@@ -295,6 +345,21 @@ export function OutageMap() {
     <div className="relative h-full w-full">
       <div ref={containerRef} className="h-full w-full" />
       <MapControls />
+      <PresencePill />
     </div>
   );
+}
+
+/**
+ * Conservative HTML escaping for the popup content. MapLibre's
+ * setHTML takes raw HTML so we need to neutralize user-controlled
+ * bits (place names could contain quotes or angle brackets).
+ */
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }

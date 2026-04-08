@@ -198,6 +198,11 @@
   },
   "map": {
     "ceb_layer": "CEB දත්ත",
-    "crowd_layer": "වාර්තා"
+    "crowd_layer": "වාර්තා",
+    "mine_layer": "මගේ",
+    "presence_one": "1 මාර්ගගතයි",
+    "presence_other": "{{count}} මාර්ගගතයි",
+    "home_gps": "ඔබගේ වර්තමාන ස්ථානය",
+    "home_manual": "තෝරාගත් ස්ථානය"
   }
 }

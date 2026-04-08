@@ -198,6 +198,11 @@
   },
   "map": {
     "ceb_layer": "CEB தரவு",
-    "crowd_layer": "அறிக்கைகள்"
+    "crowd_layer": "அறிக்கைகள்",
+    "mine_layer": "எனது",
+    "presence_one": "1 ஆன்லைன்",
+    "presence_other": "{{count}} ஆன்லைன்",
+    "home_gps": "உங்கள் தற்போதைய இருப்பிடம்",
+    "home_manual": "தேர்ந்தெடுக்கப்பட்ட இடம்"
   }
 }

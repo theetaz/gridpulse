@@ -198,6 +198,11 @@
   },
   "map": {
     "ceb_layer": "CEB data",
-    "crowd_layer": "Reports"
+    "crowd_layer": "Reports",
+    "mine_layer": "Mine",
+    "presence_one": "1 online",
+    "presence_other": "{{count}} online",
+    "home_gps": "Your current location",
+    "home_manual": "Selected location"
   }
 }
