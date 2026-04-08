@@ -4,18 +4,31 @@
  * avoids the overhead of mounting a React root per pin — with up to
  * a few hundred points on screen, the difference matters.
  *
- * IMPORTANT: the returned element is what MapLibre writes its
- * `transform: translate(x, y)` onto for positioning. We must not
- * overwrite its transform with our own hover/scale effects — doing
- * that was the cause of a bug where tapping a marker caused it to
- * jump to the map origin on mobile (mouseenter fired and clobbered
- * MapLibre's translate; mouseleave never fired on touch, leaving the
- * marker stuck off-center).
+ * CRITICAL RULES — both learned the hard way:
+ *
+ * 1. The returned element is what MapLibre writes its
+ *    `transform: translate(x, y)` onto for positioning.  We must
+ *    NEVER set a transform on it ourselves — doing so clobbered
+ *    the translate and caused markers to snap to the map origin
+ *    on tap.
+ *
+ * 2. Do not put `transition: transform` / `will-change: transform`
+ *    on the marker element OR any descendant that participates in
+ *    the same layer tree as the marker, because on mobile those
+ *    cause the markers to visibly drift during map pan (the
+ *    compositor interpolates stale transforms at 60 fps).
+ *
+ * So: the marker has a fixed visual with zero transforms of any
+ * kind.  No hover scale.  On mobile there's no hover anyway, and
+ * on desktop the static pin looks fine.
  *
  * Layout:
- *   outer        — handed to MapLibre. Plain wrapper, no transform.
- *     inner      — the visible circle. Hover scales THIS element.
- *       halo     — absolute-positioned pulsing ring (mine/home only).
+ *   outer        — handed to MapLibre.  Positioned via MapLibre's
+ *                  translate; we never touch its transform.
+ *     inner      — the visible circle (absolute, inset 0).  Static.
+ *       halo     — pulsing ring for mine/home variants.  Animation
+ *                  scales the halo, not the inner, so it stays
+ *                  isolated from layout.
  *       svg      — the icon.
  *
  * Variants:
@@ -103,7 +116,7 @@ export function buildMarkerElement(kind: MarkerKind): HTMLDivElement {
     position: relative;
   `;
 
-  // Inner — the visible circle. Hover scales this one.
+  // Inner — the visible circle. Static. No transform, no transition.
   const inner = document.createElement('div');
   inner.className = 'gp-marker-inner';
   inner.style.cssText = `
@@ -116,9 +129,6 @@ export function buildMarkerElement(kind: MarkerKind): HTMLDivElement {
     align-items: center;
     justify-content: center;
     border: 2px solid rgba(255,255,255,0.9);
-    transform: scale(1);
-    transition: transform 120ms ease;
-    will-change: transform;
   `;
 
   if (style.glow) {
@@ -145,32 +155,12 @@ export function buildMarkerElement(kind: MarkerKind): HTMLDivElement {
   svg.setAttribute('stroke-width', '2.4');
   svg.setAttribute('stroke-linecap', 'round');
   svg.setAttribute('stroke-linejoin', 'round');
-  svg.style.position = 'relative';
-  svg.style.zIndex = '1';
   const path = document.createElementNS(svgNs, 'path');
   path.setAttribute('d', style.path);
   svg.appendChild(path);
   inner.appendChild(svg);
 
   outer.appendChild(inner);
-
-  // Hover scales the INNER element only — never the outer, which
-  // MapLibre owns.
-  outer.addEventListener('mouseenter', () => {
-    inner.style.transform = 'scale(1.12)';
-  });
-  outer.addEventListener('mouseleave', () => {
-    inner.style.transform = 'scale(1)';
-  });
-  // Reset on pointer cancel / touch end in case mouseleave never fires
-  // (common on iOS after a tap).
-  outer.addEventListener('touchend', () => {
-    inner.style.transform = 'scale(1)';
-  });
-  outer.addEventListener('touchcancel', () => {
-    inner.style.transform = 'scale(1)';
-  });
-
   return outer;
 }
 
