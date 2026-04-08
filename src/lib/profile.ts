@@ -12,6 +12,14 @@
 
 const DEVICE_ID_KEY = 'gridpulse.device-id';
 const DISPLAY_NAME_KEY = 'gridpulse.display-name';
+const HOME_LOCATION_KEY = 'gridpulse.home-location';
+
+export interface HomeLocation {
+  lat: number;
+  lon: number;
+  name: string;        // short — "Maradana"
+  displayName: string; // long — "Maradana, Colombo District, Western Province, Sri Lanka"
+}
 
 const ADJECTIVES = [
   'Brave', 'Calm', 'Bright', 'Swift', 'Kind', 'Wise', 'Bold', 'Gentle',
@@ -64,4 +72,35 @@ export function rerollDisplayName(): string {
   const name = generateDisplayName();
   setDisplayName(name);
   return name;
+}
+
+export function getHomeLocation(): HomeLocation | null {
+  if (typeof window === 'undefined') return null;
+  const raw = localStorage.getItem(HOME_LOCATION_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (
+      typeof parsed?.lat === 'number' &&
+      typeof parsed?.lon === 'number' &&
+      typeof parsed?.name === 'string'
+    ) {
+      return parsed as HomeLocation;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function setHomeLocation(loc: HomeLocation): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(HOME_LOCATION_KEY, JSON.stringify(loc));
+  window.dispatchEvent(new Event('profile-change'));
+}
+
+export function clearHomeLocation(): void {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem(HOME_LOCATION_KEY);
+  window.dispatchEvent(new Event('profile-change'));
 }

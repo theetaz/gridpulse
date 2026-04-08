@@ -20,3 +20,28 @@ geocodeRoutes.get('/search', async (c) => {
   const results = await geopop.searchCities(q, limit);
   return c.json({ results });
 });
+
+/**
+ * GET /api/geocode/reverse?lat=6.9271&lon=79.8612
+ *
+ * Lightweight reverse geocode, used by the map-pin-point location picker
+ * so the user sees a live place name update as they drag the crosshair.
+ */
+geocodeRoutes.get('/reverse', async (c) => {
+  const lat = Number(c.req.query('lat'));
+  const lon = Number(c.req.query('lon'));
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return c.json({ error: 'lat and lon are required' }, 400);
+  }
+  const geopop = new GeoPopService(c.env.GEOPOP_URL);
+  const place = await geopop.reverse(lat, lon);
+  if (!place) return c.json({ place: null });
+  return c.json({
+    place: {
+      name: place.placeName,
+      displayName: place.displayName,
+      district: place.district,
+      province: place.province,
+    },
+  });
+});

@@ -11,40 +11,62 @@ import {
 } from '@/components/ui/drawer';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { MapPin, Loader2, ZapOff } from 'lucide-react';
+import { Loader2, ZapOff } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
-import { useLocation } from '@/hooks/useLocation';
+import { useHomeLocation } from '@/hooks/useHomeLocation';
+import { useGeolocation } from '@/hooks/useGeolocation';
 import { submitReportResilient } from '@/lib/offlineQueue';
 import type { ReportCreateResponse } from '@/types/api';
 import { toast } from 'sonner';
+import { LocationChooser, type ChosenLocation } from './LocationChooser';
 
 export function ReportSheet() {
   const { t } = useTranslation();
   const open = useAppStore((s) => s.reportSheetOpen);
   const close = useAppStore((s) => s.closeReportSheet);
-  const { lat, lon, error: geoError, loading: geoLoading, refresh, source, placeName } = useLocation();
+  const { home } = useHomeLocation();
+  const { position } = useGeolocation(false);
   const [description, setDescription] = useState('');
+  const [location, setLocation] = useState<ChosenLocation | null>(null);
   const qc = useQueryClient();
 
-  // Re-prompt for location whenever the sheet opens
+  // When the sheet opens, initialize the picked location with the user's
+  // strongest default: home → current GPS → nothing (user must pick).
   useEffect(() => {
-    if (open) refresh();
-    if (!open) setDescription('');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+    if (!open) {
+      setDescription('');
+      setLocation(null);
+      return;
+    }
+    if (home) {
+      setLocation({
+        lat: home.lat,
+        lon: home.lon,
+        source: 'home',
+        name: home.name,
+        displayName: home.displayName,
+      });
+    } else if (position) {
+      setLocation({
+        lat: position.lat,
+        lon: position.lon,
+        source: 'gps',
+        name: null,
+        displayName: null,
+      });
+    }
+  }, [open, home, position]);
 
   const submit = useMutation<ReportCreateResponse | null, Error>({
     mutationFn: () =>
       submitReportResilient({
-        lat: lat!,
-        lon: lon!,
+        lat: location!.lat,
+        lon: location!.lon,
         type: 'unplanned',
         description: description.trim() || undefined,
       }),
     onSuccess: (data) => {
       if (data === null) {
-        // Queued offline — surfaces the same success copy so the user
-        // doesn't worry; it'll sync when they're back online.
         toast.success(t('report.success_title'), { description: t('report.success_body') });
       } else if (data.fused) {
         toast.success(t('report.fused_title'), { description: t('report.fused_body') });
@@ -56,16 +78,14 @@ export function ReportSheet() {
       qc.invalidateQueries({ queryKey: ['analytics'] });
       close();
     },
-    onError: () => {
-      toast.error(t('report.error_submit'));
-    },
+    onError: () => toast.error(t('report.error_submit')),
   });
 
   return (
     <Drawer open={open} onOpenChange={(o) => (o ? null : close())}>
       <DrawerContent>
-        <div className="mx-auto w-full max-w-md">
-          <DrawerHeader className="text-left">
+        <div className="mx-auto flex max-h-[90vh] w-full max-w-md flex-col">
+          <DrawerHeader className="shrink-0 text-left">
             <div className="bg-primary text-primary-foreground mb-3 flex h-10 w-10 items-center justify-center">
               <ZapOff className="h-5 w-5" />
             </div>
@@ -73,41 +93,8 @@ export function ReportSheet() {
             <DrawerDescription>{t('report.subtitle')}</DrawerDescription>
           </DrawerHeader>
 
-          <div className="space-y-4 px-4">
-            <div className="border-border bg-muted/30 flex items-start gap-3 border p-3">
-              <MapPin className="mt-0.5 h-4 w-4 shrink-0" />
-              <div className="min-w-0 flex-1">
-                {geoLoading ? (
-                  <div className="text-muted-foreground flex items-center gap-2 text-sm">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    {t('home.locating')}
-                  </div>
-                ) : geoError ? (
-                  <div>
-                    <p className="text-sm font-medium">{t('report.error_location')}</p>
-                    <button
-                      type="button"
-                      onClick={refresh}
-                      className="text-primary mt-1 text-xs hover:underline"
-                    >
-                      {t('home.location_retry')}
-                    </button>
-                  </div>
-                ) : lat != null && lon != null ? (
-                  <div>
-                    <p className="text-xs font-bold uppercase tracking-wide">
-                      {source === 'manual' ? t('search.using_manual') : t('report.use_my_location')}
-                    </p>
-                    {placeName && (
-                      <p className="text-xs font-medium">{placeName}</p>
-                    )}
-                    <p className="text-muted-foreground mt-0.5 font-mono text-[11px]">
-                      {lat.toFixed(5)}, {lon.toFixed(5)}
-                    </p>
-                  </div>
-                ) : null}
-              </div>
-            </div>
+          <div className="flex-1 space-y-4 overflow-y-auto px-4">
+            <LocationChooser value={location} onChange={setLocation} />
 
             <div>
               <label className="text-xs font-bold uppercase tracking-wide">
@@ -124,10 +111,10 @@ export function ReportSheet() {
             </div>
           </div>
 
-          <DrawerFooter>
+          <DrawerFooter className="shrink-0">
             <Button
               size="lg"
-              disabled={lat == null || lon == null || submit.isPending}
+              disabled={!location || submit.isPending}
               onClick={() => submit.mutate()}
             >
               {submit.isPending ? (
