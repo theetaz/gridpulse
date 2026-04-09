@@ -1,9 +1,12 @@
+import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion } from 'motion/react';
 import { Zap, ZapOff, Clock, Users, Timer, MapPin, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useLocation } from '@/hooks/useLocation';
+import type { GeoErrorReason } from '@/hooks/useGeolocation';
 import { usePowerStatus } from '@/hooks/usePowerStatus';
 import { useAppStore } from '@/stores/appStore';
 import { relativeTime, formatDistance, formatDuration, formatNumber } from '@/lib/format';
@@ -20,19 +23,66 @@ import { relativeTime, formatDistance, formatDuration, formatNumber } from '@/li
  */
 export function StatusCard() {
   const { t } = useTranslation();
-  const { lat, lon, error: geoError, loading: geoLoading, refresh, source, placeName } = useLocation();
+  const {
+    lat,
+    lon,
+    error: geoError,
+    errorReason: geoReason,
+    loading: geoLoading,
+    refresh,
+    source,
+    placeName,
+  } = useLocation();
   const { data, isLoading } = usePowerStatus(lat, lon);
   const openReport = useAppStore((s) => s.openReportSheet);
   const selectOutage = useAppStore((s) => s.selectOutage);
 
+  // Surface a toast the first time we see a given error reason. Using
+  // a ref (not state) so we don't re-render on dedupe, and keying the
+  // toast id on the reason so repeated refreshes with the same error
+  // replace the toast instead of stacking them.
+  const lastToastedReason = useRef<GeoErrorReason | null>(null);
+  useEffect(() => {
+    if (!geoReason) {
+      lastToastedReason.current = null;
+      return;
+    }
+    if (lastToastedReason.current === geoReason) return;
+    lastToastedReason.current = geoReason;
+    toast.error(t(`home.geo_error_${geoReason}_title`), {
+      id: `geo-${geoReason}`,
+      description: t(`home.geo_error_${geoReason}_body`),
+      duration: 8000,
+    });
+  }, [geoReason, t]);
+
   if (geoError) {
+    const reason: GeoErrorReason = geoReason ?? 'unavailable';
+    // Only 'unsupported' and 'insecure' are terminal — the rest can
+    // be recovered by user action, so we show the retry button.
+    const canRetry = reason !== 'unsupported' && reason !== 'insecure';
     return (
       <div className="border-border bg-muted/30 border p-4 text-center">
         <MapPin className="text-muted-foreground mx-auto h-6 w-6" />
-        <p className="mt-2 text-xs font-medium">{t('home.location_error')}</p>
-        <Button size="sm" variant="outline" className="mt-2 h-7 px-3 text-[11px]" onClick={refresh}>
-          {t('home.location_retry')}
-        </Button>
+        <p className="mt-2 text-xs font-bold">
+          {t(`home.geo_error_${reason}_title`)}
+        </p>
+        <p className="text-muted-foreground mx-auto mt-1 max-w-[18rem] text-[11px] leading-snug">
+          {t(`home.geo_error_${reason}_body`)}
+        </p>
+        {canRetry && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="mt-3 h-7 px-3 text-[11px]"
+            onClick={refresh}
+          >
+            {t('home.location_retry')}
+          </Button>
+        )}
+        <p className="text-muted-foreground mt-3 text-[10px]">
+          {t('home.geo_pick_city_hint')}
+        </p>
       </div>
     );
   }

@@ -39,7 +39,20 @@
     "location_error": "ඔබේ ස්ථානය ලබා ගත නොහැක",
     "location_retry": "නැවත උත්සාහ කරන්න",
     "place_label": "ඔබ සිටින්නේ",
-    "place_label_manual": "බලමින්"
+    "place_label_manual": "බලමින්",
+    "geo_error_denied_title": "ස්ථානය අවහිර කර ඇත",
+    "geo_error_denied_body": "ස්ථාන අවසරය ප්‍රතික්ෂේප කර ඇත. iPhone හි Settings → Safari → Location වෙතට ගොස් එය ඉඩ දී, පසුව නැවත උත්සාහ කරන්න. ඔබට ඉහළ සෙවුම් තීරුවෙන් නගරයක් ද තෝරාගත හැක.",
+    "geo_error_unavailable_title": "ඔබේ ස්ථානය සොයාගත නොහැකි විය",
+    "geo_error_unavailable_body": "ඔබේ උපාංගයට GPS සංඥාවක් ලබා ගත නොහැකි විය. ජනේලයක් අසලට ගොස්, ස්ථාන සේවා සක්‍රිය බව තහවුරු කර, නැවත උත්සාහ කරන්න.",
+    "geo_error_timeout_title": "ස්ථානය ලැබීමට වැඩි කාලයක් ගත වේ",
+    "geo_error_timeout_body": "GPS නියමිත කාලයේදී ප්‍රතිචාර නොදැක්වීය. නැවත උත්සාහ කරන්න, නැතහොත් ඉහළ සෙවුම් තීරුවෙන් නගරයක් තෝරන්න.",
+    "geo_error_unsupported_title": "ස්ථාන සේවාවට සහාය නොදක්වයි",
+    "geo_error_unsupported_body": "මෙම බ්‍රව්සරය ස්ථාන සේවාවට සහාය නොදක්වයි. ඉදිරියට යාමට ඉහළ සෙවුම් තීරුවෙන් නගරයක් තෝරන්න.",
+    "geo_error_insecure_title": "ආරක්ෂිත සම්බන්ධතාවයක් අවශ්‍යයි",
+    "geo_error_insecure_body": "ස්ථාන සේවාව ක්‍රියා කරන්නේ ආරක්ෂිත (HTTPS) සම්බන්ධතාවයක් තුළ පමණි. පිටුව නැවත පූරණය කරන්න.",
+    "geo_error_in_app_browser_title": "ඔබගේ බ්‍රව්සරයේ විවෘත කරන්න",
+    "geo_error_in_app_browser_body": "Facebook සහ Instagram හි ඇතුළත් බ්‍රව්සර ස්ථාන සේවාව අවහිර කරයි. ••• මෙනුව තට්ටු කර 'Open in Safari' හෝ 'Open in Chrome' තෝරන්න.",
+    "geo_pick_city_hint": "නැතහොත් ඉහළ සෙවුම් තීරුවෙන් නගරයක් තෝරන්න."
   },
   "report": {
     "title": "විදුලි කප්පාදුවක් වාර්තා කරන්න",

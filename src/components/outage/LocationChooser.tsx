@@ -1,6 +1,7 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Locate, Search, MapPin, Loader2, X, Home, Pencil } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useGeocodeSearch } from '@/hooks/useGeocodeSearch';
@@ -41,22 +42,63 @@ export function LocationChooser({ value, onChange, hideHome }: Props) {
   const [mapOpen, setMapOpen] = useState(false);
 
   const { home } = useHomeLocation();
-  const { position, loading: gpsLoading, error: gpsError, refresh } = useGeolocation(false);
+  const {
+    position,
+    loading: gpsLoading,
+    error: gpsError,
+    errorReason: gpsReason,
+    refresh,
+  } = useGeolocation(false);
   const { data: searchData, isFetching: searching } = useGeocodeSearch(query);
 
   const searchResults = searchData?.results ?? [];
 
-  const pickCurrent = () => {
-    refresh();
+  // When the user taps "Use my current location" we need to wait for
+  // the async getCurrentPosition callback before committing — the
+  // previous synchronous version used a stale `position` and did
+  // nothing on the first click. A ref (not state) avoids a lint-
+  // forbidden setState-in-effect; gpsLoading from the hook already
+  // gives us the re-render we need for UI updates.
+  const awaitingGpsRef = useRef(false);
+  // Keep onChange in a ref so the commit effect doesn't re-fire every
+  // render just because the parent passed a new callback identity.
+  const onChangeRef = useRef(onChange);
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
+  useEffect(() => {
+    if (!awaitingGpsRef.current || gpsLoading) return;
     if (position) {
-      onChange({
+      onChangeRef.current({
         lat: position.lat,
         lon: position.lon,
         source: 'gps',
         name: null,
         displayName: null,
       });
+      awaitingGpsRef.current = false;
+    } else if (gpsReason) {
+      awaitingGpsRef.current = false;
     }
+  }, [gpsLoading, position, gpsReason]);
+
+  // Toast whenever the error reason changes — since this hook is
+  // autoRequest=false, a non-null reason is always the result of a
+  // user tap, so we can surface it unconditionally. Keyed toast id
+  // dedupes repeated clicks that hit the same error.
+  useEffect(() => {
+    if (!gpsReason) return;
+    toast.error(t(`home.geo_error_${gpsReason}_title`), {
+      id: `geo-${gpsReason}`,
+      description: t(`home.geo_error_${gpsReason}_body`),
+      duration: 8000,
+    });
+  }, [gpsReason, t]);
+
+  const pickCurrent = () => {
+    awaitingGpsRef.current = true;
+    refresh();
   };
 
   const pickHome = () => {
@@ -120,7 +162,9 @@ export function LocationChooser({ value, onChange, hideHome }: Props) {
               {gpsLoading ? (
                 <p className="text-muted-foreground text-[11px]">{t('home.locating')}</p>
               ) : gpsError ? (
-                <p className="text-muted-foreground text-[11px]">{t('home.location_error')}</p>
+                <p className="text-destructive text-[11px]">
+                  {t(`home.geo_error_${gpsReason ?? 'unavailable'}_title`)}
+                </p>
               ) : position ? (
                 <p className="text-muted-foreground font-mono text-[11px]">
                   {position.lat.toFixed(5)}, {position.lon.toFixed(5)}

@@ -1,4 +1,4 @@
-import { useGeolocation } from './useGeolocation';
+import { useGeolocation, type GeoErrorReason } from './useGeolocation';
 import { useAppStore } from '@/stores/appStore';
 
 /**
@@ -22,6 +22,7 @@ export function useLocation() {
       displayName: manual.displayName,
       source: 'manual' as const,
       error: null,
+      errorReason: null as GeoErrorReason | null,
       loading: false,
       refresh: geo.refresh,
     };
@@ -34,6 +35,7 @@ export function useLocation() {
     displayName: null,
     source: 'gps' as const,
     error: geo.error,
+    errorReason: geo.errorReason,
     loading: geo.loading,
     refresh: geo.refresh,
   };

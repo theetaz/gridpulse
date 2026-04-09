@@ -39,7 +39,20 @@
     "location_error": "Couldn't get your location",
     "location_retry": "Try again",
     "place_label": "You are in",
-    "place_label_manual": "Viewing"
+    "place_label_manual": "Viewing",
+    "geo_error_denied_title": "Location blocked",
+    "geo_error_denied_body": "Location access was denied. On iPhone, open Settings → Safari → Location and allow it, then tap Try again. You can also pick a city from the search bar at the top.",
+    "geo_error_unavailable_title": "Couldn't find your location",
+    "geo_error_unavailable_body": "Your device couldn't get a GPS fix. Move closer to a window, check that Location Services are on, then tap Try again.",
+    "geo_error_timeout_title": "Location is taking too long",
+    "geo_error_timeout_body": "GPS didn't respond in time. Tap Try again, or pick a city from the search bar at the top.",
+    "geo_error_unsupported_title": "Location not supported",
+    "geo_error_unsupported_body": "This browser doesn't support location. Pick a city from the search bar at the top to continue.",
+    "geo_error_insecure_title": "Secure connection needed",
+    "geo_error_insecure_body": "Location only works over a secure (HTTPS) connection. Try reloading the page.",
+    "geo_error_in_app_browser_title": "Open in your browser",
+    "geo_error_in_app_browser_body": "Facebook and Instagram's in-app browsers block location. Tap the ••• menu and choose 'Open in Safari' (or 'Open in Chrome') to continue.",
+    "geo_pick_city_hint": "Or pick a city from the search bar at the top."
   },
   "report": {
     "title": "Report a power cut",
