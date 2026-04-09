@@ -1183,6 +1183,8 @@ type MapClusterLayerProps<
   clusterThresholds?: [number, number];
   /** Color for unclustered individual points (default: "#3b82f6") */
   pointColor?: string;
+  /** Radius of unclustered individual points in pixels (default: 5) */
+  pointRadius?: number;
   /** Callback when an unclustered point is clicked */
   onPointClick?: (
     feature: GeoJSON.Feature<GeoJSON.Point, P>,
@@ -1205,6 +1207,7 @@ function MapClusterLayer<
   clusterColors = ["#22c55e", "#eab308", "#ef4444"],
   clusterThresholds = [100, 750],
   pointColor = "#3b82f6",
+  pointRadius = 5,
   onPointClick,
   onClusterClick,
 }: MapClusterLayerProps<P>) {
@@ -1219,6 +1222,7 @@ function MapClusterLayer<
     clusterColors,
     clusterThresholds,
     pointColor,
+    pointRadius,
   });
 
   // Add source and layers on mount
@@ -1289,7 +1293,7 @@ function MapClusterLayer<
       filter: ["!", ["has", "point_count"]],
       paint: {
         "circle-color": pointColor,
-        "circle-radius": 5,
+        "circle-radius": pointRadius,
         "circle-stroke-width": 2,
         "circle-stroke-color": "#fff",
       },
@@ -1356,7 +1360,17 @@ function MapClusterLayer<
       map.setPaintProperty(unclusteredLayerId, "circle-color", pointColor);
     }
 
-    stylePropsRef.current = { clusterColors, clusterThresholds, pointColor };
+    // Update unclustered point layer radius
+    if (map.getLayer(unclusteredLayerId) && prev.pointRadius !== pointRadius) {
+      map.setPaintProperty(unclusteredLayerId, "circle-radius", pointRadius);
+    }
+
+    stylePropsRef.current = {
+      clusterColors,
+      clusterThresholds,
+      pointColor,
+      pointRadius,
+    };
   }, [
     isLoaded,
     map,
@@ -1365,6 +1379,7 @@ function MapClusterLayer<
     clusterColors,
     clusterThresholds,
     pointColor,
+    pointRadius,
   ]);
 
   // Handle click events

@@ -17,8 +17,8 @@ export function CebMarkerIcon() {
 
 export function CrowdMarkerIcon() {
   return (
-    <div className="ring-blue-500/35 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-blue-500 shadow-lg ring-[3px]">
-      <Users className="h-3.5 w-3.5 text-white" strokeWidth={3} />
+    <div className="ring-blue-500/35 flex h-9 w-9 items-center justify-center rounded-full border-2 border-white bg-blue-500 shadow-lg ring-[3px]">
+      <Users className="h-4 w-4 text-white" strokeWidth={3} />
     </div>
   );
 }
@@ -27,8 +27,8 @@ export function MineMarkerIcon() {
   return (
     <div className="relative">
       <span className="bg-violet-500/50 absolute -inset-1 animate-ping rounded-full" />
-      <div className="ring-violet-500/55 relative flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-violet-500 shadow-lg ring-[3px]">
-        <Star className="h-4 w-4 text-white" strokeWidth={3} fill="currentColor" />
+      <div className="ring-violet-500/55 relative flex h-10 w-10 items-center justify-center rounded-full border-2 border-white bg-violet-500 shadow-lg ring-[3px]">
+        <Star className="h-5 w-5 text-white" strokeWidth={3} fill="currentColor" />
       </div>
     </div>
   );

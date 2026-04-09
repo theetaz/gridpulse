@@ -156,6 +156,7 @@ export function OutageMap() {
             clusterColors={['#fecaca', '#ef4444', '#991b1b']}
             clusterThresholds={[5, 20]}
             pointColor="#ef4444"
+            pointRadius={11}
             onPointClick={(feature) => {
               const id = feature.properties?.id as string | undefined;
               if (id) selectOutage(id);
